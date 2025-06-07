@@ -67,22 +67,21 @@ You can use an exclamation mark (`!`) before certain parameters to control outli
 ## Complex Example: Multi-Data Dashboard with Outlines and Axis Flips
 
 ```plaintext
-# CPU, RAM, and Disk as bars with outlines and axis flips
-GRAPH,BAR,!5,!5,!50,6,// top -bn1 | grep "Cpu(s)" | awk '{print int($2 + $4)}' //
-GRAPH,BAR,!60,!5,50,!6,// free | awk '/Mem:/ {print int($3/$2*100)}' //
-GRAPH,BAR,115,!5,!40,!6,// df / | awk 'END {print int($5)}' //
+# CPU use as a line graph
+GRAPH,LINE,0,4,157,35,100,// top -bn1 | grep "Cpu(s)" | awk '{print int($2 + $4)}' //
+
+# CPU, RAM, and GPU as bars with outlines
+GRAPH,BAR,!5,!5,50,6,100,// top -bn1 | grep "Cpu(s)" | awk '{print int($2 + $4)}' //
+GRAPH,BAR,!60,!5,50,6,100,// free | awk '/Mem:/ {print int($3/$2*100)}' //
+GRAPH,BAR,!115,!5,40,6,100,// amdgpu_top -d --json | jq ".[0].gpu_activity.GFX.value" //
 
 # Labels under each bar
-5,13,L,0,1,// echo CPU //
-60,13,L,0,1,// echo RAM //
-115,13,L,0,1,// echo DISK //
+5,13,L,0,0,// printf CPU //
+60,13,L,0,0,// printf RAM //
+115,13,L,0,0,// printf GPU //
 
-# Show current time and date, centered
-80,30,C,0,1// date "+%H:%M:%S %a %b %d" //
-
-# CPU use as a line graph, flipped X axis, with outline
-GRAPH,LINE,!0,25,!157,10,100,// top -bn1 | grep "Cpu(s)" | awk '{print int($2 + $4)}' //
-
+# Show current time and date, centered (spaces needed cuz alignment is broken rn)
+78,30,C,0,1,// printf "    " && date "+%H:%M:%S %a %b %d" //
 ```
 
 ---

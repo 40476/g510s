@@ -1,0 +1,6 @@
+.debian
+*.o
+*.out
+ChangeLog
+README
+INSTALL

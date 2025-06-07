@@ -64,7 +64,7 @@ You can use an exclamation mark (`!`) before certain parameters to control outli
 
 ---
 
-## Complex Example: Multi-Data Dashboard with Outlines and Axis Flips
+## Complex Example by copilot cuz lazy
 
 ```plaintext
 # CPU use as a line graph

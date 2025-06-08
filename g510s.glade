@@ -230,6 +230,16 @@
                         <signal name="toggled" handler="on_menuhidden_toggled" swapped="no"/>
                       </object>
                     </child>
+                    <child>
+                      <object class="GtkCheckMenuItem" id="menuautosaveonquit">
+                        <property name="name">menuautosaveonquit</property>
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Auto Save on Quit</property>
+                        <property name="use_underline">True</property>
+                        <signal name="toggled" handler="on_menuautosaveonquit_toggled" swapped="no"/>
+                      </object>
+                    </child>
                   </object>
                 </child>
               </object>

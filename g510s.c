@@ -16,6 +16,7 @@
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA
  *
  *  Copyright © 2015 John Augustine
+ *  Copyright © 2025 usr_40476
  */
 
 
@@ -44,6 +45,10 @@ static gboolean on_handle_set_color(GDBusConnection *connection, const gchar *se
                                     const gchar *interface_name, const gchar *method_name, GVariant *parameters,
                                     GDBusMethodInvocation *invocation, gpointer user_data);
 
+static gboolean on_handle_save_config(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
+                                      const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                      GDBusMethodInvocation *invocation, gpointer user_data);
+
 // DBus vtable
 static const GDBusInterfaceVTable interface_vtable = {
     .method_call = NULL, // Will be set below
@@ -59,6 +64,8 @@ static void on_method_call(GDBusConnection *connection, const gchar *sender, con
         on_handle_set_mode(connection, sender, object_path, interface_name, method_name, parameters, invocation, user_data);
     } else if (g_strcmp0(method_name, "SetColor") == 0) {
         on_handle_set_color(connection, sender, object_path, interface_name, method_name, parameters, invocation, user_data);
+    } else if (g_strcmp0(method_name, "SaveConfig") == 0) {
+        on_handle_save_config(connection, sender, object_path, interface_name, method_name, parameters, invocation, user_data);
     } else {
         g_dbus_method_invocation_return_error(invocation, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "Unknown method: %s", method_name);
     }
@@ -95,6 +102,15 @@ static gboolean on_handle_set_color(GDBusConnection *connection, const gchar *se
     return TRUE;
 }
 
+// SaveConfig handler
+static gboolean on_handle_save_config(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
+                                      const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                      GDBusMethodInvocation *invocation, gpointer user_data) {
+    save_config();
+    g_dbus_method_invocation_return_value(invocation, NULL);
+    return TRUE;
+}
+
 // DBus registration callback
 static void on_bus_acquired(GDBusConnection *connection, const gchar *name, gpointer user_data) {
     static GDBusNodeInfo *introspection_data = NULL;
@@ -109,6 +125,7 @@ static void on_bus_acquired(GDBusConnection *connection, const gchar *name, gpoi
         "      <arg type='i' name='green' direction='in'/>"
         "      <arg type='i' name='blue' direction='in'/>"
         "    </method>"
+        "    <method name='SaveConfig'/>"
         "  </interface>"
         "</node>";
 
@@ -132,6 +149,7 @@ static void on_bus_acquired(GDBusConnection *connection, const gchar *name, gpoi
 }
 
 GtkCheckMenuItem *menuhidden;
+GtkCheckMenuItem *menuautosave;
 AppIndicator *indicator;
 
 int main(int argc, char *argv[]) {
@@ -438,6 +456,13 @@ int main(int argc, char *argv[]) {
   entry_mrg18 = GTK_ENTRY(gtk_builder_get_object(builder, "entry_mrg18"));
   
   menuhidden = GTK_CHECK_MENU_ITEM(gtk_builder_get_object(builder, "menuhidden"));
+  menuautosave = GTK_CHECK_MENU_ITEM(gtk_builder_get_object(builder, "menuautosaveonquit"));
+  // Set initial value from menu state
+  if (gtk_check_menu_item_get_active(menuautosave) == TRUE) {
+      g510s_data.auto_save_on_quit = 1;
+  } else {
+      g510s_data.auto_save_on_quit = 0;
+  }
   
   // indicator
   indicator_menu = GTK_WIDGET(gtk_builder_get_object(builder, "indicator_menu"));
@@ -564,6 +589,13 @@ int main(int argc, char *argv[]) {
     app_indicator_set_status(indicator, APP_INDICATOR_STATUS_ATTENTION);
   }
 
+  // Set menuautosave toggle state based on loaded config
+  if (g510s_data.auto_save_on_quit) {
+      gtk_check_menu_item_set_active(menuautosave, TRUE);
+  } else {
+      gtk_check_menu_item_set_active(menuautosave, FALSE);
+  }
+
   // --- DBus setup ---
   guint owner_id = g_bus_own_name(
       G_BUS_TYPE_SESSION,
@@ -586,7 +618,12 @@ int main(int argc, char *argv[]) {
   //pthread_cancel(key_thread);
   
   // save data before leaving
-  save_config();
+  if (menuautosave) {
+      g510s_data.auto_save_on_quit = gtk_check_menu_item_get_active(menuautosave) ? 1 : 0;
+  }
+  if (g510s_data.auto_save_on_quit) {
+      save_config();
+  }
 
   // DBus cleanup
   g_bus_unown_name(owner_id);

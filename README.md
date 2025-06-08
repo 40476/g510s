@@ -12,7 +12,6 @@ Graphical utility for Logitech G510 and G510s keyboards on Linux.
 ## TODO
 
 * Valgrind
-* DBUS IPC
 * Save on system shutdown
 * Change screens from GUI
 
@@ -26,11 +25,11 @@ Graphical utility for Logitech G510 and G510s keyboards on Linux.
 * Executable as user (instead of root -- **DO NOT RUN AS ROOT**)
 * GUI and AppIndicator for desktop integration
 * Handles device hotplug events (on-device audio)
-* LCD display server
+* DBUS profile and color control
 * Custom LCD configurations
 * libg15daemon-client compatibility
 
-## SystemD file (assumes keyboard is always connected)
+## SystemD file
 
 ```systemd
 [Unit]
@@ -39,15 +38,13 @@ After=default.target
 Requires=default.target
 
 [Service]
-ExecStart=/bin/bash -c 'while true; do /usr/local/bin/g510s & PID=$!; while ps -p $PID > /dev/null; do CPU_USAGE=$(top -b -n1 -p $PID | awk "/$PID/ {print \$9}"); if (( $(echo "$CPU_USAGE > 90" | bc -l) )); then kill -9 $PID; fi; sleep 5; done; done'
+ExecStart=/bin/bash -c 'while true; do if lsusb | grep -q "046d:c22d"; then /usr/local/bin/g510s & PID=$!; while ps -p $PID > /dev/null; do CPU_USAGE=$(top -b -n1 -p $PID | awk "/$PID/ {print \$9}"); if (( $(echo "$CPU_USAGE > 90" | bc -l) )); then kill -9 $PID; fi; sleep 5; done; else sleep 10; fi; done'
 Restart=always
 RestartSec=1
 
 [Install]
 WantedBy=default.target
 ```
-
-
 
 ---
 

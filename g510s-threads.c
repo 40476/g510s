@@ -16,6 +16,7 @@
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA
  *
  *  Copyright © 2015 John Augustine
+ *  Copyright © 2025 usr_40476
  */
 
 
@@ -27,7 +28,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <libg15.h>
-#include <libappindicator/app-indicator.h>
+#include <libappindicator3-0.1/libappindicator/app-indicator.h>
 
 #include "g510s.h"
 

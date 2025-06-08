@@ -16,6 +16,8 @@
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA
  *
  *  Copyright © 2015 John Augustine
+ *  Copyright © 2025 usr_40476
+ *  
  */
 
 
@@ -31,6 +33,7 @@
 
 void init_data() {
   // gui
+  g510s_data.auto_save_on_quit = 0;
   g510s_data.gui_hidden = 0;
   
   // function
@@ -169,6 +172,7 @@ int write_conf(const char *path) {
 
     // gui
     fprintf(file, "gui_hidden=%d\n", g510s_data.gui_hidden);
+    fprintf(file, "auto_save_on_quit=%d\n", g510s_data.auto_save_on_quit); // persist auto-save
 
     // function
     fprintf(file, "mkey_state=%d\n", g510s_data.mkey_state);
@@ -304,6 +308,7 @@ int read_conf(const char *path) {
 
         // gui
         if (strcmp(key, "gui_hidden") == 0) g510s_data.gui_hidden = atoi(val);
+        else if (strcmp(key, "auto_save_on_quit") == 0) g510s_data.auto_save_on_quit = atoi(val);
 
         // function
         else if (strcmp(key, "mkey_state") == 0) g510s_data.mkey_state = atoi(val);

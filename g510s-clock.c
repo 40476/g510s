@@ -16,6 +16,7 @@
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA
  *
  *  Copyright © 2015 John Augustine
+ *  Copyright © 2025 usr_40476
  */
 
 
@@ -396,11 +397,18 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                 output[--outlen] = '\0';
             }
             int text_len = strlen(output);
-            int px = tx;
-            // Assume each character is 5 pixels wide, plus 1 pixel spacing
-            int char_width = 5;
+
+            // Font width logic
+            int char_width;
+            switch (size) {
+                case 0: char_width = 3; break;
+                case 1: char_width = 4; break;
+                case 2: char_width = 7; break;
+                default: char_width = 5; break; // fallback for other sizes
+            }
             int spacing = 1;
             int total_width = text_len * (char_width + spacing) - spacing;
+            int px = tx;
             if (align_c == 'C' || align_c == 'c') {
                 px = tx - total_width / 2;
             } else if (align_c == 'R' || align_c == 'r') {

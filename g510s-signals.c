@@ -16,16 +16,18 @@
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA
  *
  *  Copyright © 2015 John Augustine
+ *  Copyright © 2025 usr_40476
  */
 
 
 #include <string.h>
-#include <gtk/gtk.h>
+#include <gtk-3.0/gtk/gtk.h>
 
 #include "g510s.h"
 
 
 extern GtkCheckMenuItem *menuhidden;
+extern GtkCheckMenuItem *menuautosave;
 
 // menubar actions
 void on_menusave_activate(GtkMenuItem *menuitem, gpointer window) {
@@ -37,6 +39,14 @@ void on_menuhidden_toggled(GtkMenuItem *menuitem, gpointer user_data) {
     g510s_data.gui_hidden = 1;
   } else {
     g510s_data.gui_hidden = 0;
+  }
+}
+
+void on_menuautosaveonquit_toggled(GtkMenuItem *menuitem, gpointer user_data) {
+  if (gtk_check_menu_item_get_active(menuautosave) == TRUE) {
+    g510s_data.auto_save_on_quit = 1;
+  } else {
+    g510s_data.auto_save_on_quit = 0;
   }
 }
 

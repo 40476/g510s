@@ -16,6 +16,7 @@
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA
  *
  *  Copyright © 2015 John Augustine
+ *  Copyright © 2025 usr_40476
  */
 
 
@@ -111,6 +112,7 @@ struct g510s_data_s {
   struct m_data_s mr;
   int clock_mode;
   int show_date;
+  int auto_save_on_quit;
 } g510s_data;
 
 int leaving;

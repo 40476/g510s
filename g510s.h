@@ -20,7 +20,7 @@
  */
 
 
-#define G510S_VERSION "0.0.4"
+#define G510S_VERSION "0.0.5"
 
 #ifndef SO_PRIORITY
 #define SO_PRIORITY 12

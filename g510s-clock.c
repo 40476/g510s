@@ -388,6 +388,14 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
         *cmd_end = 0;
         char *cmd = cmd_start+2;
 
+        // --- Begin: Remove all newlines from command if ^ before first // ---
+        int remove_newlines = 0;
+        if (cmd_start > line && *(cmd_start-1) == '^') {
+            remove_newlines = 1;
+            *(cmd_start-1) = '\0'; // Remove the ^ from the line
+        }
+        // --- End: Remove all newlines from command if ^ before first // ---
+
         if (sscanf(line, "%d,%d,%c,%d,%d", &tx, &ty, &align_c, &angle, &size) == 5) {
             char output[MAX_CMD_OUTPUT] = {0};
             exec_cmd(cmd, output, sizeof(output));
@@ -395,6 +403,17 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
             size_t outlen = strlen(output);
             while (outlen > 0 && (output[outlen - 1] == '\n' || output[outlen - 1] == '\r')) {
                 output[--outlen] = '\0';
+            }
+            // Remove all newlines if requested
+            if (remove_newlines) {
+                char *src = output, *dst = output;
+                while (*src) {
+                    if (*src != '\n' && *src != '\r') {
+                        *dst++ = *src;
+                    }
+                    src++;
+                }
+                *dst = '\0';
             }
             int text_len = strlen(output);
 

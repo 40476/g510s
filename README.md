@@ -99,7 +99,7 @@ GRAPH,BAR,!115,!5,40,6,100,// amdgpu_top -d --json | jq ".[0].gpu_activity.GFX.v
 
 ---
 
-## More Ideas
+## More Stuff
 
 * Show temperature:  
   `10,20,L,0,8,// sensors | awk '/^Package id 0:/ {print int($4)}' //`

@@ -281,16 +281,17 @@ int read_conf(const char *path) {
     FILE *file = fopen(path, "r");
     if (!file) return -1;
 
-    char key[64], value[256];
-    while (fgets(key, sizeof(key), file)) {
+    char line[64 + GKEY_STRLEN]; // key + value
+    while (fgets(line, sizeof(line), file)) {
         // Skip empty lines or lines without '='
-        if (key[0] == '\n' || strchr(key, '=') == NULL)
+        if (line[0] == '\n' || strchr(line, '=') == NULL)
             continue;
 
         // Split key and value
-        char *eq = strchr(key, '=');
+        char *eq = strchr(line, '=');
         if (!eq) continue;
         *eq = '\0';
+        char *key = line;
         char *val = eq + 1;
 
         // Remove trailing newline from value
@@ -332,32 +333,32 @@ int read_conf(const char *path) {
                 snprintf(gkey, sizeof(gkey), "m1_g%d", i);
                 if (strcmp(key, gkey) == 0) {
                     char *fields[] = {g510s_data.m1.g1, g510s_data.m1.g2, g510s_data.m1.g3, g510s_data.m1.g4, g510s_data.m1.g5, g510s_data.m1.g6, g510s_data.m1.g7, g510s_data.m1.g8, g510s_data.m1.g9, g510s_data.m1.g10, g510s_data.m1.g11, g510s_data.m1.g12, g510s_data.m1.g13, g510s_data.m1.g14, g510s_data.m1.g15, g510s_data.m1.g16, g510s_data.m1.g17, g510s_data.m1.g18};
-                    strncpy(fields[i-1], val, sizeof(g510s_data.m1.g1)-1);
-                    fields[i-1][sizeof(g510s_data.m1.g1)-1] = '\0';
+                    strncpy(fields[i-1], val, GKEY_STRLEN - 1);
+                    fields[i-1][GKEY_STRLEN - 1] = '\0';
                     found = 1;
                     break;
                 }
                 snprintf(gkey, sizeof(gkey), "m2_g%d", i);
                 if (strcmp(key, gkey) == 0) {
                     char *fields[] = {g510s_data.m2.g1, g510s_data.m2.g2, g510s_data.m2.g3, g510s_data.m2.g4, g510s_data.m2.g5, g510s_data.m2.g6, g510s_data.m2.g7, g510s_data.m2.g8, g510s_data.m2.g9, g510s_data.m2.g10, g510s_data.m2.g11, g510s_data.m2.g12, g510s_data.m2.g13, g510s_data.m2.g14, g510s_data.m2.g15, g510s_data.m2.g16, g510s_data.m2.g17, g510s_data.m2.g18};
-                    strncpy(fields[i-1], val, sizeof(g510s_data.m2.g1)-1);
-                    fields[i-1][sizeof(g510s_data.m2.g1)-1] = '\0';
+                    strncpy(fields[i-1], val, GKEY_STRLEN - 1);
+                    fields[i-1][GKEY_STRLEN - 1] = '\0';
                     found = 1;
                     break;
                 }
                 snprintf(gkey, sizeof(gkey), "m3_g%d", i);
                 if (strcmp(key, gkey) == 0) {
                     char *fields[] = {g510s_data.m3.g1, g510s_data.m3.g2, g510s_data.m3.g3, g510s_data.m3.g4, g510s_data.m3.g5, g510s_data.m3.g6, g510s_data.m3.g7, g510s_data.m3.g8, g510s_data.m3.g9, g510s_data.m3.g10, g510s_data.m3.g11, g510s_data.m3.g12, g510s_data.m3.g13, g510s_data.m3.g14, g510s_data.m3.g15, g510s_data.m3.g16, g510s_data.m3.g17, g510s_data.m3.g18};
-                    strncpy(fields[i-1], val, sizeof(g510s_data.m3.g1)-1);
-                    fields[i-1][sizeof(g510s_data.m3.g1)-1] = '\0';
+                    strncpy(fields[i-1], val, GKEY_STRLEN - 1);
+                    fields[i-1][GKEY_STRLEN - 1] = '\0';
                     found = 1;
                     break;
                 }
                 snprintf(gkey, sizeof(gkey), "mr_g%d", i);
                 if (strcmp(key, gkey) == 0) {
                     char *fields[] = {g510s_data.mr.g1, g510s_data.mr.g2, g510s_data.mr.g3, g510s_data.mr.g4, g510s_data.mr.g5, g510s_data.mr.g6, g510s_data.mr.g7, g510s_data.mr.g8, g510s_data.mr.g9, g510s_data.mr.g10, g510s_data.mr.g11, g510s_data.mr.g12, g510s_data.mr.g13, g510s_data.mr.g14, g510s_data.mr.g15, g510s_data.mr.g16, g510s_data.mr.g17, g510s_data.mr.g18};
-                    strncpy(fields[i-1], val, sizeof(g510s_data.mr.g1)-1);
-                    fields[i-1][sizeof(g510s_data.mr.g1)-1] = '\0';
+                    strncpy(fields[i-1], val, GKEY_STRLEN - 1);
+                    fields[i-1][GKEY_STRLEN - 1] = '\0';
                     found = 1;
                     break;
                 }

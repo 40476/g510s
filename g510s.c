@@ -23,11 +23,113 @@
 #include <pthread.h>
 #include <libg15.h>
 #include <libg15render.h>
-#include <gtk/gtk.h>
-#include <libappindicator/app-indicator.h>
+#include <gtk-3.0/gtk/gtk.h>
+#include <libappindicator3-0.1/libappindicator/app-indicator.h>
+#include <glib-2.0/gio/gio.h> // Add for DBus support
+#include <glib.h>    // Add for guint definition
 
 #include "g510s.h"
 
+// DBus interface and object path
+#define G510S_DBUS_NAME "org.g510s.Control"
+#define G510S_DBUS_PATH "/org/g510s/Control"
+#define G510S_DBUS_INTERFACE "org.g510s.Control"
+
+// Forward declarations for DBus handlers
+static gboolean on_handle_set_mode(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
+                                   const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                   GDBusMethodInvocation *invocation, gpointer user_data);
+
+static gboolean on_handle_set_color(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
+                                    const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                    GDBusMethodInvocation *invocation, gpointer user_data);
+
+// DBus vtable
+static const GDBusInterfaceVTable interface_vtable = {
+    .method_call = NULL, // Will be set below
+    .get_property = NULL,
+    .set_property = NULL
+};
+
+// DBus method handler
+static void on_method_call(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
+                           const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                           GDBusMethodInvocation *invocation, gpointer user_data) {
+    if (g_strcmp0(method_name, "SetMode") == 0) {
+        on_handle_set_mode(connection, sender, object_path, interface_name, method_name, parameters, invocation, user_data);
+    } else if (g_strcmp0(method_name, "SetColor") == 0) {
+        on_handle_set_color(connection, sender, object_path, interface_name, method_name, parameters, invocation, user_data);
+    } else {
+        g_dbus_method_invocation_return_error(invocation, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "Unknown method: %s", method_name);
+    }
+}
+
+// SetMode handler: expects (i) for mode (1,2,3)
+static gboolean on_handle_set_mode(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
+                                   const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                   GDBusMethodInvocation *invocation, gpointer user_data) {
+    int mode;
+    g_variant_get(parameters, "(i)", &mode);
+    if (mode < 1 || mode > 3) {
+        g_dbus_method_invocation_return_error(invocation, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "Invalid mode: %d", mode);
+        return TRUE;
+    }
+    g510s_data.mkey_state = mode;
+    set_mkey_state(mode);
+    g_dbus_method_invocation_return_value(invocation, NULL);
+    return TRUE;
+}
+
+// SetColor handler: expects (iii) for red, green, blue (0-255)
+static gboolean on_handle_set_color(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
+                                    const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                    GDBusMethodInvocation *invocation, gpointer user_data) {
+    int r, g, b;
+    g_variant_get(parameters, "(iii)", &r, &g, &b);
+    if (r < 0 || r > 255 || g < 0 || g > 255 || b < 0 || b > 255) {
+        g_dbus_method_invocation_return_error(invocation, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "Invalid color values");
+        return TRUE;
+    }
+    setG510LEDColor(r, g, b);
+    g_dbus_method_invocation_return_value(invocation, NULL);
+    return TRUE;
+}
+
+// DBus registration callback
+static void on_bus_acquired(GDBusConnection *connection, const gchar *name, gpointer user_data) {
+    static GDBusNodeInfo *introspection_data = NULL;
+    static const gchar introspection_xml[] =
+        "<node>"
+        "  <interface name='org.g510s.Control'>"
+        "    <method name='SetMode'>"
+        "      <arg type='i' name='mode' direction='in'/>"
+        "    </method>"
+        "    <method name='SetColor'>"
+        "      <arg type='i' name='red' direction='in'/>"
+        "      <arg type='i' name='green' direction='in'/>"
+        "      <arg type='i' name='blue' direction='in'/>"
+        "    </method>"
+        "  </interface>"
+        "</node>";
+
+    if (!introspection_data)
+        introspection_data = g_dbus_node_info_new_for_xml(introspection_xml, NULL);
+
+    guint registration_id = g_dbus_connection_register_object(
+        connection,
+        G510S_DBUS_PATH,
+        introspection_data->interfaces[0],
+        &(GDBusInterfaceVTable){
+            .method_call = on_method_call,
+            .get_property = NULL,
+            .set_property = NULL
+        },
+        NULL, NULL, NULL);
+
+    if (registration_id == 0) {
+        g_warning("Failed to register DBus object");
+    }
+}
 
 GtkCheckMenuItem *menuhidden;
 AppIndicator *indicator;
@@ -461,7 +563,20 @@ int main(int argc, char *argv[]) {
   } else {
     app_indicator_set_status(indicator, APP_INDICATOR_STATUS_ATTENTION);
   }
-  
+
+  // --- DBus setup ---
+  guint owner_id = g_bus_own_name(
+      G_BUS_TYPE_SESSION,
+      G510S_DBUS_NAME,
+      G_BUS_NAME_OWNER_FLAGS_NONE,
+      on_bus_acquired,
+      NULL,
+      NULL,
+      NULL,
+      NULL
+  );
+  // --- end DBus setup ---
+
   gtk_main();
   
   // notify threads to exit
@@ -472,6 +587,9 @@ int main(int argc, char *argv[]) {
   
   // save data before leaving
   save_config();
+
+  // DBus cleanup
+  g_bus_unown_name(owner_id);
   
   // close gracefully
   if (device_found) {

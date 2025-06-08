@@ -41,6 +41,9 @@
 
 #define SERV_HELO "G15 daemon HELLO"
 
+#ifndef GKEY_STRLEN
+#define GKEY_STRLEN 1024
+#endif
 
 typedef struct lcd_s {
   int lcd_type;
@@ -79,24 +82,24 @@ struct m_data_s {
   int red;
   int green;
   int blue;
-  char g1[256];
-  char g2[256];
-  char g3[256];
-  char g4[256];
-  char g5[256];
-  char g6[256];
-  char g7[256];
-  char g8[256];
-  char g9[256];
-  char g10[256];
-  char g11[256];
-  char g12[256];
-  char g13[256];
-  char g14[256];
-  char g15[256];
-  char g16[256];
-  char g17[256];
-  char g18[256];
+  char g1[GKEY_STRLEN];
+  char g2[GKEY_STRLEN];
+  char g3[GKEY_STRLEN];
+  char g4[GKEY_STRLEN];
+  char g5[GKEY_STRLEN];
+  char g6[GKEY_STRLEN];
+  char g7[GKEY_STRLEN];
+  char g8[GKEY_STRLEN];
+  char g9[GKEY_STRLEN];
+  char g10[GKEY_STRLEN];
+  char g11[GKEY_STRLEN];
+  char g12[GKEY_STRLEN];
+  char g13[GKEY_STRLEN];
+  char g14[GKEY_STRLEN];
+  char g15[GKEY_STRLEN];
+  char g16[GKEY_STRLEN];
+  char g17[GKEY_STRLEN];
+  char g18[GKEY_STRLEN];
 };
 
 struct g510s_data_s {

@@ -422,7 +422,7 @@ void digital_clock(lcd_t *lcd) {
     if (lcd->ident != currtime) {
         g15canvas *canvas = (g15canvas *)malloc(sizeof(g15canvas));
         if (canvas == NULL) {
-            printf("G510s: failed to create clock canvas\n");
+            printf("G510s: failed to create display canvas\n");
             return;
         }
 
@@ -460,7 +460,7 @@ void digital_clock(lcd_t *lcd) {
                 strftime(hour_buf, 3, "%H", localtime(&currtime));
             }
             g15r_renderString(canvas, (unsigned char *)hour_buf, 0, 39, 30, 2);
-            // g15r_G15FPrint(canvas, ":", 77, -3, 39, 0, 1, 0);
+            //g15r_G15FPrint(canvas, ":", 77, -3, 39, 0, 1, 0);
 
             // minute
             strftime(min_buf, 3, "%M", localtime(&currtime));

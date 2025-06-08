@@ -26,7 +26,7 @@ Graphical utility for Logitech G510 and G510s keyboards on Linux.
 * GUI and AppIndicator for desktop integration
 * Handles device hotplug events (on-device audio)
 * DBUS profile and color control
-* Custom LCD configurations
+* Advanced custom LCD configurations
 * libg15daemon-client compatibility
 
 ## SystemD file

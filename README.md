@@ -48,13 +48,16 @@ WantedBy=default.target
 
 ---
 
-## Special Prefixes for Shape and Graph Parameters
+## Special Prefixes
 
 * `!` before **x**: Draw only the left/right outline (for rectangles/bars/graphs).
 * `!` before **y**: Draw only the top/bottom outline.
 * `!` before **w**: Flip the X axis (draw right-to-left for bars/graphs).
 * `!` before **h**: Flip the Y axis (draw bottom-to-top for bars/graphs).
 * `^` removes all newlines from a command output
+* `%` defines and accesses a variable
+* `%%` is just a normal `%` sign
+
 **You can combine these as needed.**
 
 ---

@@ -35,7 +35,7 @@ void on_menusave_activate(GtkMenuItem *menuitem, gpointer window) {
 }
 
 void on_menuhidden_toggled(GtkMenuItem *menuitem, gpointer user_data) {
-  if (gtk_check_menu_item_get_active(menuhidden) == TRUE) {
+  if (gtk_check_menu_item_get_active(menuhidden) == 1) {
     g510s_data.gui_hidden = 1;
   } else {
     g510s_data.gui_hidden = 0;
@@ -43,7 +43,7 @@ void on_menuhidden_toggled(GtkMenuItem *menuitem, gpointer user_data) {
 }
 
 void on_menuautosaveonquit_toggled(GtkMenuItem *menuitem, gpointer user_data) {
-  if (gtk_check_menu_item_get_active(menuautosave) == TRUE) {
+  if (gtk_check_menu_item_get_active(menuautosave) == 1) {
     g510s_data.auto_save_on_quit = 1;
   } else {
     g510s_data.auto_save_on_quit = 0;

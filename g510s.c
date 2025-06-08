@@ -316,9 +316,11 @@ int main(int argc, char *argv[]) {
   if (setupLibG15(0x46d, 0xc22d, 0) == G15_NO_ERROR) { // g510/g510s no audio
     printf("G510s: found device 046d:c22d\n");
     device_found = 1;
+    usb_id="046d:c22d";
   } else if (setupLibG15(0x46d, 0xc22e, 0) == G15_NO_ERROR) { // g510/g510s with audio
     printf("G510s: found device 046d:c22e\n");
     device_found = 1;
+    usb_id="046d:c22e";
   } else {
     printf("G510s: failed to initialize libg15\n");
     device_found = 0;
@@ -458,11 +460,6 @@ int main(int argc, char *argv[]) {
   menuhidden = GTK_CHECK_MENU_ITEM(gtk_builder_get_object(builder, "menuhidden"));
   menuautosave = GTK_CHECK_MENU_ITEM(gtk_builder_get_object(builder, "menuautosaveonquit"));
   // Set initial value from menu state
-  if (gtk_check_menu_item_get_active(menuautosave) == TRUE) {
-      g510s_data.auto_save_on_quit = 1;
-  } else {
-      g510s_data.auto_save_on_quit = 0;
-  }
   
   // indicator
   indicator_menu = GTK_WIDGET(gtk_builder_get_object(builder, "indicator_menu"));
@@ -580,6 +577,13 @@ int main(int argc, char *argv[]) {
     gtk_widget_show(window);
     gtk_check_menu_item_set_active(menuhidden, FALSE);
   }
+
+  // Set menuautosave toggle state based on loaded config
+  if (g510s_data.auto_save_on_quit == 1) {
+      gtk_check_menu_item_set_active(menuautosave, TRUE);
+  } else {
+      gtk_check_menu_item_set_active(menuautosave, FALSE);
+  }
   
   // now we're ready to update the keyboard
   if (device_found) {
@@ -588,14 +592,8 @@ int main(int argc, char *argv[]) {
   } else {
     app_indicator_set_status(indicator, APP_INDICATOR_STATUS_ATTENTION);
   }
-
-  // Set menuautosave toggle state based on loaded config
-  if (g510s_data.auto_save_on_quit) {
-      gtk_check_menu_item_set_active(menuautosave, TRUE);
-  } else {
-      gtk_check_menu_item_set_active(menuautosave, FALSE);
-  }
-
+  
+  // gtk_check_menu_item_set_active(menuautosave, TRUE);
   // --- DBus setup ---
   guint owner_id = g_bus_own_name(
       G_BUS_TYPE_SESSION,
@@ -630,32 +628,16 @@ int main(int argc, char *argv[]) {
   
   // close gracefully
   if (device_found) {
-    // clear the screen
-    g15canvas *canvas = (g15canvas *)malloc(sizeof(g15canvas));
-    if (canvas == NULL) {
-      printf("G510s: failed to allocate clearing canvas\n");
-    } else {
-      memset(canvas->buffer, 0, G15_BUFFER_LEN);
-      g15r_clearScreen(canvas, 0);
-      if (writePixmapToLCD(canvas->buffer) != 0) {
-        printf("G510s: failed to clear lcd\n");
-      }
-      free(canvas);
-    }
-    
-    // shut off the lights
-    if (setLEDs(0) < 0) {
-      printf("G510s: failed to clear leds\n");
-    }
-    if (setG510LEDColor(0, 0, 0) < 0) {
-      printf("G510s: failed to clear color\n");
-    }
-    
     // close uinput
     exit_uinput();
-    
     // close libg15
     exitLibG15();
+    // return keyboard to default
+    if (usb_id) {
+      char cmd[128];
+      snprintf(cmd, sizeof(cmd), "usbreset %s", usb_id);
+      system(cmd);
+    }
   }
   
   // clean up lcdlist

@@ -130,12 +130,12 @@ void init_data() {
   memset(g510s_data.mr.g17, 0, sizeof(g510s_data.mr.g17));
   memset(g510s_data.mr.g18, 0, sizeof(g510s_data.mr.g18));
   
-  // clock settings
+  // clock settings -- idk if this even gets used anymore
   g510s_data.clock_mode = 0;
   g510s_data.show_date = 1;
 }
 
-int check_dir() {
+int check_dir() { 
   char home_path[255];
   char g510s_dir[] = "/.config/g510s";
   char *full_path;
@@ -147,21 +147,21 @@ int check_dir() {
     printf("G510s: failed to find $HOME directory, using default settings\n");
     return -1;
   }
-
+  
   full_path = malloc(strlen(home_path) + strlen(g510s_dir) + 1);
   strcpy(full_path, home_path);
   strcat(full_path, g510s_dir);
 
   if ((dir = opendir(full_path)) == NULL) {
     if (mkdir(full_path, 0777) == -1) {
-      printf("G510s: failed to create directory $HOME/.config/g510s\n");
-      free(full_path);
-      return -1;
+        printf("G510s: failed to create directory $HOME/.config/g510s\n");
+        free(full_path);
+        return -1;
     }
+  } else {
+    closedir(dir);
   }
-
   free(full_path);
-
   return 0;
 }
 
@@ -308,7 +308,7 @@ int read_conf(const char *path) {
 
         // gui
         if (strcmp(key, "gui_hidden") == 0) g510s_data.gui_hidden = atoi(val);
-        else if (strcmp(key, "auto_save_on_quit") == 0) g510s_data.auto_save_on_quit = atoi(val);
+        if (strcmp(key, "auto_save_on_quit") == 0) g510s_data.auto_save_on_quit = atoi(val);
 
         // function
         else if (strcmp(key, "mkey_state") == 0) g510s_data.mkey_state = atoi(val);

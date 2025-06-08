@@ -118,6 +118,7 @@ struct g510s_data_s {
 int leaving;
 int update;
 int device_found;
+char *usb_id;
 unsigned int connected_clients;
 unsigned int current_key_state;
 

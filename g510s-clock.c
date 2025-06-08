@@ -209,7 +209,7 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
             continue;
         }
 
-        // Graph/bar/pie/line: GRAPH,TYPE,x,y,w,h,// bash-cmd // (outline/axis swap and axis flip support)
+        // Graph/bar/pie/line: GRAPH,TYPE,x,y,w,h,// shell-cmd // (outline/axis swap and axis flip support)
         if (strncmp(line, "GRAPH,", 6) == 0) {
             char type[8] = {0};
             char *cmd_start = strstr(line, "//");

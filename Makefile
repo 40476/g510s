@@ -32,12 +32,13 @@ g510s: g510s.o g510s-clock.o g510s-config.o g510s-keys.o g510s-list.o g510s-misc
 
 install:
 	-mkdir /usr/local/share/g510s
-	-mkdir /usr/doc/g510s
+	-mkdir /usr/share/doc
+	-mkdir /usr/share/doc/g510s
 	-cp g510s.svg /usr/local/share/g510s
 	-cp g510s-alert.svg /usr/local/share/g510s
 	-cp g510s.glade /usr/local/share/g510s
 	-cp g510s /usr/local/bin
-	-cp REAMDME.md /usr/doc/g510s/README.md
+	-cp REAMDME.md /usr/share/doc/g510s/README.md
 	-cp 99-g510s.rules /lib/udev/rules.d
 
 uninstall:

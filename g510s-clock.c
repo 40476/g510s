@@ -29,12 +29,21 @@
 #include <string.h>
 #include <unistd.h>
 #include <math.h>
+#include <ctype.h> // For isalnum
 
 #include "g510s.h"
 
 #define MAX_SCRIPT_LINES 32
 #define MAX_LINE_LEN 256
 #define MAX_CMD_OUTPUT 256
+#define MAX_SCRIPT_VARS 32
+#define MAX_VAR_NAME 32
+#define MAX_VAR_VALUE 256
+
+typedef struct {
+    char name[MAX_VAR_NAME];
+    char value[MAX_VAR_VALUE];
+} script_var_t;
 
 static void trim(char *str) {
     char *end;
@@ -67,6 +76,47 @@ static int parse_int_flag(const char **str, int *flag) {
     return atoi(*str);
 }
 
+static int find_var(script_var_t *vars, int var_count, const char *name) {
+    for (int i = 0; i < var_count; ++i) {
+        if (strcmp(vars[i].name, name) == 0)
+            return i;
+    }
+    return -1;
+}
+
+static void substitute_vars(char *line, script_var_t *vars, int var_count) {
+    char buf[MAX_LINE_LEN * 2] = {0};
+    char *src = line, *dst = buf;
+    while (*src) {
+        if (*src == '%' && *(src+1) == '%') {
+            // %% -> %
+            *dst++ = '%';
+            src += 2;
+        } else if (*src == '%' && isalpha(*(src+1))) {
+            src++;
+            char varname[MAX_VAR_NAME] = {0};
+            int vi = 0;
+            while (*src && (isalnum(*src) || *src == '_') && vi < MAX_VAR_NAME-1) {
+                varname[vi++] = *src++;
+            }
+            varname[vi] = 0;
+            int idx = find_var(vars, var_count, varname);
+            if (idx >= 0) {
+                int vlen = strlen(vars[idx].value);
+                if ((dst - buf) + vlen < (int)sizeof(buf) - 1) {
+                    strcpy(dst, vars[idx].value);
+                    dst += vlen;
+                }
+            }
+        } else {
+            *dst++ = *src++;
+        }
+    }
+    *dst = 0;
+    strncpy(line, buf, MAX_LINE_LEN-1);
+    line[MAX_LINE_LEN-1] = 0;
+}
+
 static int render_scripted_display(g15canvas *canvas, const char *filepath) {
     FILE *f = fopen(filepath, "r");
     if (!f) return 0; // file not found
@@ -75,8 +125,54 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
     int rendered = 0;
     static int last_line_y[MAX_SCRIPT_LINES] = {0}; // For line graph state
 
+    // --- Variable storage ---
+    script_var_t vars[MAX_SCRIPT_VARS];
+    int var_count = 0;
+    // --- End variable storage ---
+
     while (fgets(line, sizeof(line), f)) {
         trim(line);
+        if (line[0] == 0 || line[0] == '#') continue;
+
+        // --- Variable definition: %varname // command // ---
+        if (line[0] == '%') {
+            char *p = line + 1;
+            char varname[MAX_VAR_NAME] = {0};
+            int vi = 0;
+            while (*p && (isalnum(*p) || *p == '_') && vi < MAX_VAR_NAME-1) {
+                varname[vi++] = *p++;
+            }
+            varname[vi] = 0;
+            while (*p == ' ' || *p == '\t') p++;
+            // Look for // ... //
+            char *cmd_start = strstr(p, "//");
+            if (!*varname || !cmd_start) continue;
+            cmd_start += 2;
+            char *cmd_end = strstr(cmd_start, "//");
+            if (!cmd_end) continue;
+            *cmd_end = 0;
+            char *cmd = cmd_start;
+            char output[MAX_VAR_VALUE] = {0};
+            exec_cmd(cmd, output, sizeof(output));
+            // Remove trailing newlines
+            size_t outlen = strlen(output);
+            while (outlen > 0 && (output[outlen - 1] == '\n' || output[outlen - 1] == '\r')) {
+                output[--outlen] = '\0';
+            }
+            // Store variable
+            if (var_count < MAX_SCRIPT_VARS) {
+                strncpy(vars[var_count].name, varname, MAX_VAR_NAME-1);
+                vars[var_count].name[MAX_VAR_NAME-1] = 0;
+                strncpy(vars[var_count].value, output, MAX_VAR_VALUE-1);
+                vars[var_count].value[MAX_VAR_VALUE-1] = 0;
+                var_count++;
+            }
+            continue;
+        }
+
+        // --- Variable substitution ---
+        substitute_vars(line, vars, var_count);
+
         if (line[0] == 0 || line[0] == '#') continue;
 
         // Rectangle: RECT,x,y,w,h (filled or outline, axis swap)

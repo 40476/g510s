@@ -441,10 +441,17 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                     static int line_pos[MAX_SCRIPT_LINES] = {0};
                     int idx = rendered % MAX_SCRIPT_LINES;
                     int px = x;
-                    int py = y + h - (h * percent / 100);
+                    int py = y + h;
 
                     int pos = line_pos[idx];
                     if (w > 255) w = 255;
+
+                    // Zero out the buffer if starting a new line (first point)
+                    if (pos == 0) {
+                        for (int i = 0; i < w; ++i)
+                            line_points[idx][i] = y + h; // baseline
+                    }
+
                     line_points[idx][pos] = py;
                     line_pos[idx] = (pos + 1) % w;
 
@@ -454,8 +461,11 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                         int p2 = (pos + 2 + i) % w;
                         int x1 = x + (flip_x ? (w - 1 - i) : i);
                         int x2 = x + (flip_x ? (w - 2 - i) : i + 1);
-                        int y1 = line_points[idx][p1];
-                        int y2 = line_points[idx][p2];
+
+                        // If undefined (zero), treat as baseline
+                        int y1 = line_points[idx][p1] ? line_points[idx][p1] : (y + h);
+                        int y2 = line_points[idx][p2] ? line_points[idx][p2] : (y + h);
+
                         int dx = abs(x2 - x1), sx = x1 < x2 ? 1 : -1;
                         int dy = -abs(y2 - y1), sy = y1 < y2 ? 1 : -1;
                         int err = dx + dy, e2;
@@ -472,6 +482,48 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                 rendered++;
                 continue;
             }
+        }
+
+        // Polygon: POLY,[x1,y1;x2,y2;...;xn,yn] (outline only)
+        if (strncmp(line, "POLY,[", 6) == 0) {
+            // Example: POLY,[(10,10);(20,20);(30,10);(25,5)]
+            const char *p = line + 5;
+            int points[64][2]; // max 64 points
+            int n_points = 0;
+            const char *s = strchr(p, '[');
+            if (s) s++;
+            while (s && *s && *s != ']') {
+                int x = 0, y = 0;
+                // Skip whitespace and separators
+                while (*s && (*s == ' ' || *s == ';' || *s == ',')) s++;
+                if (*s == '(') {
+                    s++;
+                    x = atoi(s);
+                    s = strchr(s, ',');
+                    if (!s) break;
+                    s++;
+                    y = atoi(s);
+                    s = strchr(s, ')');
+                    if (!s) break;
+                    s++;
+                    points[n_points][0] = x;
+                    points[n_points][1] = y;
+                    n_points++;
+                    if (n_points >= 64) break;
+                } else {
+                    break;
+                }
+            }
+            // Draw outline
+            for (int i = 0; i < n_points; ++i) {
+                int x1 = points[i][0];
+                int y1 = points[i][1];
+                int x2 = points[(i + 1) % n_points][0];
+                int y2 = points[(i + 1) % n_points][1];
+                g15r_drawLine(canvas, x1, y1, x2, y2, 1);
+            }
+            rendered++;
+            continue;
         }
 
         // Text line: x,y,align,angle,size,// cmd //

@@ -441,17 +441,10 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                     static int line_pos[MAX_SCRIPT_LINES] = {0};
                     int idx = rendered % MAX_SCRIPT_LINES;
                     int px = x;
-                    int py = y + h;
+                    int py = y + h - (h * percent / 100);
 
                     int pos = line_pos[idx];
                     if (w > 255) w = 255;
-
-                    // Zero out the buffer if starting a new line (first point)
-                    if (pos == 0) {
-                        for (int i = 0; i < w; ++i)
-                            line_points[idx][i] = y + h; // baseline
-                    }
-
                     line_points[idx][pos] = py;
                     line_pos[idx] = (pos + 1) % w;
 
@@ -461,11 +454,8 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                         int p2 = (pos + 2 + i) % w;
                         int x1 = x + (flip_x ? (w - 1 - i) : i);
                         int x2 = x + (flip_x ? (w - 2 - i) : i + 1);
-
-                        // If undefined (zero), treat as baseline
-                        int y1 = line_points[idx][p1] ? line_points[idx][p1] : (y + h);
-                        int y2 = line_points[idx][p2] ? line_points[idx][p2] : (y + h);
-
+                        int y1 = line_points[idx][p1];
+                        int y2 = line_points[idx][p2];
                         int dx = abs(x2 - x1), sx = x1 < x2 ? 1 : -1;
                         int dy = -abs(y2 - y1), sy = y1 < y2 ? 1 : -1;
                         int err = dx + dy, e2;

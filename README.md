@@ -65,21 +65,32 @@ WantedBy=default.target
 ## Complex Example by copilot cuz lazy
 
 ```plaintext
-# CPU use as a line graph
-GRAPH,LINE,0,4,157,35,100,// top -bn1 | grep "Cpu(s)" | awk '{print int($2 + $4)}' //
+# Variables
+%cpuval // top -bn1 | grep "Cpu(s)" | awk '{print int($2 + $4)}' //
+%ramval // free | awk '/Mem:/ {print int($3/$2*100)}' //
+%gpuval // amdgpu_top -d --json | jq ".[0].gpu_activity.GFX.value" //
 
-# CPU, RAM, and GPU as bars with outlines
-GRAPH,BAR,!5,!5,50,6,100,// top -bn1 | grep "Cpu(s)" | awk '{print int($2 + $4)}' //
-GRAPH,BAR,!60,!5,50,6,100,// free | awk '/Mem:/ {print int($3/$2*100)}' //
-GRAPH,BAR,!115,!5,40,6,100,// amdgpu_top -d --json | jq ".[0].gpu_activity.GFX.value" //
 
-# Labels under each bar
+# CPU usage graph
+GRAPH,LINE,0,4,160,35,100,// printf %cpuval //
+
+# CPU meter
 5,13,L,0,0,// printf CPU //
-60,13,L,0,0,// printf RAM //
-115,13,L,0,0,// printf GPU //
+GRAPH,BAR,!5,!5,50,6,100,// printf %cpuval //
+55,13,R,0,0,^// echo -n "%cpuval%%" //
 
-# Show current time and date, centered (spaces needed cuz alignment is broken rn)
-78,30,C,0,1,// printf "    " && date "+%H:%M:%S %a %b %d" //
+# RAM usage
+60,13,L,0,0,// printf RAM //
+GRAPH,BAR,!60,!5,50,6,100,// printf %ramval //
+110,13,R,0,0,^// echo -n "%ramval%%" //
+
+# GPU usage
+115,13,L,0,0,// printf GPU //
+GRAPH,BAR,!115,!5,40,6,100,// printf %gpuval //
+155,13,R,0,0,^// echo -n "%gpuval%%" //
+
+# Date and time
+78,30,C,0,1,// date "+%%H:%%M:%%S %%a %%b %%d" //
 ```
 
 ---

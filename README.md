@@ -93,6 +93,22 @@ GRAPH,BAR,!115,!5,40,6,100,// printf %gpuval //
 78,30,C,0,1,// date "+%%H:%%M:%%S %%a %%b %%d" //
 ```
 
+## Fill demo
+
+```plaintext
+# Rectangle examples
+RECT,5,5,30,10           # Outline rectangle at (5,5), size 30x10
+!RECT,40,5,30,10         # Filled rectangle at (40,5), size 30x10
+
+# Ellipse examples
+ELLIPSE,20,25,12,6       # Outline ellipse centered at (20,25), rx=12, ry=6
+!ELLIPSE,55,25,12,6      # Filled ellipse centered at (55,25), rx=12, ry=6
+
+# Polygon examples (triangle)
+POLY,[(80,5);(100,20);(60,20)]      # Outline triangle
+!POLY,[(120,5);(140,20);(100,20)]   # Filled triangle
+```
+
 ---
 
 ## Tips

@@ -175,39 +175,40 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
 
         if (line[0] == 0 || line[0] == '#') continue;
 
-        // Rectangle: RECT,x,y,w,h (filled or outline, axis swap)
-        if (strncmp(line, "RECT,", 5) == 0) {
-            const char *p = line + 5;
+        // Rectangle: RECT,x,y,w,h (filled or outline, fill controlled by ! at start)
+        int fill_shape = 0;
+        const char *shape_line = line;
+        if (*shape_line == '!') {
+            fill_shape = 1;
+            shape_line++;
+        }
+
+        if (strncmp(shape_line, "RECT,", 5) == 0) {
+            const char *p = shape_line + 5;
             char *tok;
             int x, y, w, h;
-            int outline_x = 0, outline_y = 0, invert_w = 0, invert_h = 0;
 
             tok = strtok((char*)p, ",");
             if (!tok) continue;
-            const char *ptok = tok;
-            x = parse_int_flag(&ptok, &outline_x);
+            x = atoi(tok);
 
             tok = strtok(NULL, ",");
             if (!tok) continue;
-            ptok = tok;
-            y = parse_int_flag(&ptok, &outline_y);
+            y = atoi(tok);
 
             tok = strtok(NULL, ",");
             if (!tok) continue;
-            ptok = tok;
-            w = parse_int_flag(&ptok, &invert_w);
+            w = atoi(tok);
 
             tok = strtok(NULL, ",");
             if (!tok) continue;
-            ptok = tok;
-            h = parse_int_flag(&ptok, &invert_h);
+            h = atoi(tok);
 
-            if (invert_w || invert_h) {
-                int tmp = x; x = y; y = tmp;
-                tmp = w; w = h; h = tmp;
-            }
-
-            if (outline_x || outline_y) {
+            if (fill_shape) {
+                for (int dy = 0; dy < h; ++dy)
+                    for (int dx = 0; dx < w; ++dx)
+                        g15r_setPixel(canvas, x + dx, y + dy, 1);
+            } else {
                 for (int dx = 0; dx < w; ++dx) {
                     g15r_setPixel(canvas, x + dx, y, 1);
                     g15r_setPixel(canvas, x + dx, y + h - 1, 1);
@@ -216,48 +217,40 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                     g15r_setPixel(canvas, x, y + dy, 1);
                     g15r_setPixel(canvas, x + w - 1, y + dy, 1);
                 }
-            } else {
-                for (int dy = 0; dy < h; ++dy)
-                    for (int dx = 0; dx < w; ++dx)
-                        g15r_setPixel(canvas, x + dx, y + dy, 1);
             }
             rendered++;
             continue;
         }
 
-        // Ellipse: ELLIPSE,x,y,rx,ry (filled or outline, axis swap)
-        if (strncmp(line, "ELLIPSE,", 8) == 0) {
-            const char *p = line + 8;
+        // Ellipse: ELLIPSE,x,y,rx,ry (filled or outline, fill controlled by ! at start)
+        fill_shape = 0;
+        shape_line = line;
+        if (*shape_line == '!') {
+            fill_shape = 1;
+            shape_line++;
+        }
+        if (strncmp(shape_line, "ELLIPSE,", 8) == 0) {
+            const char *p = shape_line + 8;
             char *tok;
             int x0, y0, rx, ry;
-            int outline_x = 0, outline_y = 0, invert_rx = 0, invert_ry = 0;
 
             tok = strtok((char*)p, ",");
             if (!tok) continue;
-            const char *ptok = tok;
-            x0 = parse_int_flag(&ptok, &outline_x);
+            x0 = atoi(tok);
 
             tok = strtok(NULL, ",");
             if (!tok) continue;
-            ptok = tok;
-            y0 = parse_int_flag(&ptok, &outline_y);
+            y0 = atoi(tok);
 
             tok = strtok(NULL, ",");
             if (!tok) continue;
-            ptok = tok;
-            rx = parse_int_flag(&ptok, &invert_rx);
+            rx = atoi(tok);
 
             tok = strtok(NULL, ",");
             if (!tok) continue;
-            ptok = tok;
-            ry = parse_int_flag(&ptok, &invert_ry);
+            ry = atoi(tok);
 
-            if (invert_rx || invert_ry) {
-                int tmp = x0; x0 = y0; y0 = tmp;
-                tmp = rx; rx = ry; ry = tmp;
-            }
-
-            if (outline_x || outline_y) {
+            if (!fill_shape) {
                 int a2 = rx * rx, b2 = ry * ry;
                 int x = 0, y = ry;
                 int dx = 2 * b2 * x, dy = 2 * a2 * y;
@@ -300,6 +293,88 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                     for (int x = -rx; x <= rx; ++x)
                         if ((x * x) * (ry * ry) + (y * y) * (rx * rx) <= (rx * rx) * (ry * ry))
                             g15r_setPixel(canvas, x0 + x, y0 + y, 1);
+            }
+            rendered++;
+            continue;
+        }
+
+        // Polygon: POLY,[x1,y1;x2,y2;...;xn,yn] (filled or outline, fill controlled by ! at start)
+        fill_shape = 0;
+        shape_line = line;
+        if (*shape_line == '!') {
+            fill_shape = 1;
+            shape_line++;
+        }
+        if (strncmp(shape_line, "POLY,[", 6) == 0) {
+            // Example: POLY,[(10,10);(20,20);(30,10);(25,5)]
+            const char *p = shape_line + 5;
+            int points[64][2]; // max 64 points
+            int n_points = 0;
+            const char *s = strchr(p, '[');
+            if (s) s++;
+            while (s && *s && *s != ']') {
+                int x = 0, y = 0;
+                // Skip whitespace and separators
+                while (*s && (*s == ' ' || *s == ';' || *s == ',')) s++;
+                if (*s == '(') {
+                    s++;
+                    x = atoi(s);
+                    s = strchr(s, ',');
+                    if (!s) break;
+                    s++;
+                    y = atoi(s);
+                    s = strchr(s, ')');
+                    if (!s) break;
+                    s++;
+                    points[n_points][0] = x;
+                    points[n_points][1] = y;
+                    n_points++;
+                    if (n_points >= 64) break;
+                } else {
+                    break;
+                }
+            }
+            if (!fill_shape) {
+                // Draw outline
+                for (int i = 0; i < n_points; ++i) {
+                    int x1 = points[i][0];
+                    int y1 = points[i][1];
+                    int x2 = points[(i + 1) % n_points][0];
+                    int y2 = points[(i + 1) % n_points][1];
+                    g15r_drawLine(canvas, x1, y1, x2, y2, 1);
+                }
+            } else {
+                // Simple polygon fill (scanline, not optimal for complex polygons)
+                int min_y = points[0][1], max_y = points[0][1];
+                for (int i = 1; i < n_points; ++i) {
+                    if (points[i][1] < min_y) min_y = points[i][1];
+                    if (points[i][1] > max_y) max_y = points[i][1];
+                }
+                for (int y = min_y; y <= max_y; ++y) {
+                    int nodes = 0;
+                    int node_x[64];
+                    int j = n_points - 1;
+                    for (int i = 0; i < n_points; ++i) {
+                        if ((points[i][1] < y && points[j][1] >= y) ||
+                            (points[j][1] < y && points[i][1] >= y)) {
+                            node_x[nodes++] = points[i][0] + (y - points[i][1]) *
+                                (points[j][0] - points[i][0]) / (points[j][1] - points[i][1]);
+                        }
+                        j = i;
+                    }
+                    // Sort the nodes
+                    for (int i = 0; i < nodes - 1; ++i)
+                        for (int k = i + 1; k < nodes; ++k)
+                            if (node_x[i] > node_x[k]) {
+                                int tmp = node_x[i];
+                                node_x[i] = node_x[k];
+                                node_x[k] = tmp;
+                            }
+                    for (int i = 0; i < nodes; i += 2)
+                        if (i + 1 < nodes)
+                            for (int x = node_x[i]; x <= node_x[i + 1]; ++x)
+                                g15r_setPixel(canvas, x, y, 1);
+                }
             }
             rendered++;
             continue;
@@ -472,48 +547,6 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                 rendered++;
                 continue;
             }
-        }
-
-        // Polygon: POLY,[x1,y1;x2,y2;...;xn,yn] (outline only)
-        if (strncmp(line, "POLY,[", 6) == 0) {
-            // Example: POLY,[(10,10);(20,20);(30,10);(25,5)]
-            const char *p = line + 5;
-            int points[64][2]; // max 64 points
-            int n_points = 0;
-            const char *s = strchr(p, '[');
-            if (s) s++;
-            while (s && *s && *s != ']') {
-                int x = 0, y = 0;
-                // Skip whitespace and separators
-                while (*s && (*s == ' ' || *s == ';' || *s == ',')) s++;
-                if (*s == '(') {
-                    s++;
-                    x = atoi(s);
-                    s = strchr(s, ',');
-                    if (!s) break;
-                    s++;
-                    y = atoi(s);
-                    s = strchr(s, ')');
-                    if (!s) break;
-                    s++;
-                    points[n_points][0] = x;
-                    points[n_points][1] = y;
-                    n_points++;
-                    if (n_points >= 64) break;
-                } else {
-                    break;
-                }
-            }
-            // Draw outline
-            for (int i = 0; i < n_points; ++i) {
-                int x1 = points[i][0];
-                int y1 = points[i][1];
-                int x2 = points[(i + 1) % n_points][0];
-                int y2 = points[(i + 1) % n_points][1];
-                g15r_drawLine(canvas, x1, y1, x2, y2, 1);
-            }
-            rendered++;
-            continue;
         }
 
         // Text line: x,y,align,angle,size,// cmd //

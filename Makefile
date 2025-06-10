@@ -38,7 +38,7 @@ install:
 	-cp g510s-alert.svg /usr/local/share/g510s
 	-cp g510s.glade /usr/local/share/g510s
 	-cp g510s /usr/local/bin
-	-cp REAMDME.md /usr/share/doc/g510s/README.md
+	-cp README.md /usr/share/doc/g510s
 	-cp 99-g510s.rules /lib/udev/rules.d
 
 uninstall:

@@ -113,6 +113,7 @@ struct g510s_data_s {
   int clock_mode;
   int show_date;
   int auto_save_on_quit;
+  int color_fade; // 1 = fade, 0 = instant
 } g510s_data;
 
 int leaving;

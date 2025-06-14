@@ -206,22 +206,47 @@ void *update_function(void *lcdlist) {
     if (device_found) {
       // only update the color if the changes will be visible
       if (update == g510s_data.mkey_state) {
+        int target_r = 0, target_g = 0, target_b = 0;
         switch (g510s_data.mkey_state) {
           case 1:
-            setG510LEDColor(g510s_data.m1.red, g510s_data.m1.green, g510s_data.m1.blue);
+            target_r = g510s_data.m1.red;
+            target_g = g510s_data.m1.green;
+            target_b = g510s_data.m1.blue;
             break;
           case 2:
-            setG510LEDColor(g510s_data.m2.red, g510s_data.m2.green, g510s_data.m2.blue);
+            target_r = g510s_data.m2.red;
+            target_g = g510s_data.m2.green;
+            target_b = g510s_data.m2.blue;
             break;
           case 3:
-            setG510LEDColor(g510s_data.m3.red, g510s_data.m3.green, g510s_data.m3.blue);
+            target_r = g510s_data.m3.red;
+            target_g = g510s_data.m3.green;
+            target_b = g510s_data.m3.blue;
             break;
           case 4:
-            setG510LEDColor(g510s_data.mr.red, g510s_data.mr.green, g510s_data.mr.blue);
+            target_r = g510s_data.mr.red;
+            target_g = g510s_data.mr.green;
+            target_b = g510s_data.mr.blue;
             break;
           default:
             printf("G510s: invalide mkey_state!!\n");
             break;
+        }
+        if (g510s_data.color_fade == 1) {
+          // Fade from current to target color
+          static int last_r = -1, last_g = -1, last_b = -1;
+          int steps = 20;
+          int delay = 10 * 1000; // 10ms per step
+          for (int i = 1; i <= steps; ++i) {
+            int r = last_r + (target_r - last_r) * i / steps;
+            int g = last_g + (target_g - last_g) * i / steps;
+            int b = last_b + (target_b - last_b) * i / steps;
+            setG510LEDColor(r, g, b);
+            usleep(delay);
+          }
+          last_r = target_r; last_g = target_g; last_b = target_b;
+        } else {
+          setG510LEDColor(target_r, target_g, target_b);
         }
         update = 0;
       }

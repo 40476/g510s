@@ -34,6 +34,7 @@
 void init_data() {
   // gui
   g510s_data.auto_save_on_quit = 0;
+  g510s_data.color_fade = 0; // default: no fade
   g510s_data.gui_hidden = 0;
   
   // function
@@ -173,6 +174,7 @@ int write_conf(const char *path) {
     // gui
     fprintf(file, "gui_hidden=%d\n", g510s_data.gui_hidden);
     fprintf(file, "auto_save_on_quit=%d\n", g510s_data.auto_save_on_quit); // persist auto-save
+    fprintf(file, "color_fade=%d\n", g510s_data.color_fade); // persist color fade
 
     // function
     fprintf(file, "mkey_state=%d\n", g510s_data.mkey_state);
@@ -309,6 +311,7 @@ int read_conf(const char *path) {
         // gui
         if (strcmp(key, "gui_hidden") == 0) g510s_data.gui_hidden = atoi(val);
         if (strcmp(key, "auto_save_on_quit") == 0) g510s_data.auto_save_on_quit = atoi(val);
+        if (strcmp(key, "color_fade") == 0) g510s_data.color_fade = atoi(val);
 
         // function
         else if (strcmp(key, "mkey_state") == 0) g510s_data.mkey_state = atoi(val);

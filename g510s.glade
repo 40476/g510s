@@ -240,6 +240,13 @@
                         <signal name="toggled" handler="on_menuautosaveonquit_toggled" swapped="no"/>
                       </object>
                     </child>
+                    <child>
+                      <object class="GtkCheckMenuItem" id="menucolorfade">
+                        <property name="label" translatable="yes">Fade LED Color</property>
+                        <property name="visible">True</property>
+                        <signal name="toggled" handler="on_menucolorfade_toggled" swapped="no"/>
+                      </object>
+                    </child>
                   </object>
                 </child>
               </object>

@@ -32,9 +32,9 @@
 #include "g510s.h"
 
 // DBus interface and object path
-#define G510S_DBUS_NAME "org.g510s.Control"
-#define G510S_DBUS_PATH "/org/g510s/Control"
-#define G510S_DBUS_INTERFACE "org.g510s.Control"
+#define G510S_DBUS_NAME "org.g510s.control"
+#define G510S_DBUS_PATH "/org/g510s/control"
+#define G510S_DBUS_INTERFACE "org.g510s.control"
 
 // Forward declarations for DBus handlers
 static gboolean on_handle_set_mode(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
@@ -116,7 +116,7 @@ static void on_bus_acquired(GDBusConnection *connection, const gchar *name, gpoi
     static GDBusNodeInfo *introspection_data = NULL;
     static const gchar introspection_xml[] =
         "<node>"
-        "  <interface name='org.g510s.Control'>"
+        "  <interface name='org.g510s.control'>"
         "    <method name='SetMode'>"
         "      <arg type='i' name='mode' direction='in'/>"
         "    </method>"
@@ -150,7 +150,13 @@ static void on_bus_acquired(GDBusConnection *connection, const gchar *name, gpoi
 
 GtkCheckMenuItem *menuhidden;
 GtkCheckMenuItem *menuautosave;
+GtkCheckMenuItem *menucolorfade;
 AppIndicator *indicator;
+
+void on_menucolorfade_toggled(GtkCheckMenuItem *menuitem, gpointer user_data) {
+    g510s_data.color_fade = gtk_check_menu_item_get_active(menuitem) ? 1 : 0;
+    save_config();
+}
 
 int main(int argc, char *argv[]) {
   int i = 1;
@@ -459,6 +465,7 @@ int main(int argc, char *argv[]) {
   
   menuhidden = GTK_CHECK_MENU_ITEM(gtk_builder_get_object(builder, "menuhidden"));
   menuautosave = GTK_CHECK_MENU_ITEM(gtk_builder_get_object(builder, "menuautosaveonquit"));
+  menucolorfade = GTK_CHECK_MENU_ITEM(gtk_builder_get_object(builder, "menucolorfade"));
   // Set initial value from menu state
   
   // indicator
@@ -583,6 +590,13 @@ int main(int argc, char *argv[]) {
       gtk_check_menu_item_set_active(menuautosave, TRUE);
   } else {
       gtk_check_menu_item_set_active(menuautosave, FALSE);
+  }
+  
+  // Set menucolorfade toggle state based on loaded config
+  if (g510s_data.color_fade == 1) {
+      gtk_check_menu_item_set_active(menucolorfade, TRUE);
+  } else {
+      gtk_check_menu_item_set_active(menucolorfade, FALSE);
   }
   
   // now we're ready to update the keyboard

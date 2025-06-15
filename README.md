@@ -4,10 +4,9 @@ Graphical utility for Logitech G510 and G510s keyboards on Linux.
 
 ## Build Dependencies
 
-* libg15-devel
-* libg15render-devel
-* libappindicator3-devel
-* libgtk-3-dev
+### OpenSUSE
+
+`sudo zypper in g510s libg15-devel libg15render-devel libappindicator3-devel`
 
 ## TODO
 

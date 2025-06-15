@@ -20,7 +20,7 @@
  */
 
 
-#define G510S_VERSION "0.0.5"
+#define G510S_VERSION "0.1.0"
 
 #ifndef SO_PRIORITY
 #define SO_PRIORITY 12
@@ -114,6 +114,9 @@ struct g510s_data_s {
   int show_date;
   int auto_save_on_quit;
   int color_fade; // 1 = fade, 0 = instant
+  int led_red;   // Current LED color, set by DBus or threads
+  int led_green;
+  int led_blue;
 } g510s_data;
 
 int leaving;

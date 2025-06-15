@@ -248,6 +248,10 @@ void *update_function(void *lcdlist) {
         } else {
           setG510LEDColor(target_r, target_g, target_b);
         }
+        setG510LEDColor(target_r, target_g, target_b);
+        g510s_data.led_red = target_r;
+        g510s_data.led_green = target_g;
+        g510s_data.led_blue = target_b;
         update = 0;
       }
       

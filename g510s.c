@@ -36,6 +36,10 @@
 #define G510S_DBUS_PATH "/org/g510s/control"
 #define G510S_DBUS_INTERFACE "org.g510s.control"
 
+// DBus property names
+#define G510S_DBUS_PROP_MODE "Mode"
+#define G510S_DBUS_PROP_COLOR "Color"
+
 // Forward declarations for DBus handlers
 static gboolean on_handle_set_mode(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
                                    const gchar *interface_name, const gchar *method_name, GVariant *parameters,
@@ -49,11 +53,52 @@ static gboolean on_handle_save_config(GDBusConnection *connection, const gchar *
                                       const gchar *interface_name, const gchar *method_name, GVariant *parameters,
                                       GDBusMethodInvocation *invocation, gpointer user_data);
 
+// DBus property getter
+static GVariant* on_get_property(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
+                                 const gchar *interface_name, const gchar *property_name, GError **error, gpointer user_data) {
+    if (g_strcmp0(property_name, G510S_DBUS_PROP_MODE) == 0) {
+        // Fetch mode on demand
+        return g_variant_new_int32(g510s_data.mkey_state);
+    } else if (g_strcmp0(property_name, G510S_DBUS_PROP_COLOR) == 0) {
+        // Fetch color on demand
+        int color[3] = {g510s_data.led_red, g510s_data.led_green, g510s_data.led_blue};
+        return g_variant_new_fixed_array(G_VARIANT_TYPE_INT32, color, 3, sizeof(int));
+    }
+    return NULL;
+}
+
+// DBus property setter (not used, properties are read-only from DBus clients)
+static gboolean on_set_property(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
+                                const gchar *interface_name, const gchar *property_name, GVariant *value, GError **error, gpointer user_data) {
+    return FALSE;
+}
+
+// Helper to emit PropertiesChanged
+static void emit_properties_changed(GDBusConnection *connection) {
+    GVariantBuilder builder;
+    GVariantBuilder invalidated;
+    g_variant_builder_init(&builder, G_VARIANT_TYPE_VARDICT);
+    g_variant_builder_init(&invalidated, G_VARIANT_TYPE_STRING_ARRAY);
+    // Fetch mode and color on demand
+    g_variant_builder_add(&builder, "{sv}", G510S_DBUS_PROP_MODE, g_variant_new_int32(g510s_data.mkey_state));
+    int color[3] = {g510s_data.led_red, g510s_data.led_green, g510s_data.led_blue};
+    g_variant_builder_add(&builder, "{sv}", G510S_DBUS_PROP_COLOR, g_variant_new_fixed_array(G_VARIANT_TYPE_INT32, color, 3, sizeof(int)));
+    g_dbus_connection_emit_signal(
+        connection,
+        NULL,
+        G510S_DBUS_PATH,
+        "org.freedesktop.DBus.Properties",
+        "PropertiesChanged",
+        g_variant_new("(sa{sv}as)", G510S_DBUS_INTERFACE, &builder, &invalidated),
+        NULL
+    );
+}
+
 // DBus vtable
 static const GDBusInterfaceVTable interface_vtable = {
     .method_call = NULL, // Will be set below
-    .get_property = NULL,
-    .set_property = NULL
+    .get_property = on_get_property,
+    .set_property = on_set_property
 };
 
 // DBus method handler
@@ -71,18 +116,20 @@ static void on_method_call(GDBusConnection *connection, const gchar *sender, con
     }
 }
 
-// SetMode handler: expects (i) for mode (1,2,3)
+// SetMode handler: expects (i) for mode (1,2,3,4)
 static gboolean on_handle_set_mode(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
                                    const gchar *interface_name, const gchar *method_name, GVariant *parameters,
                                    GDBusMethodInvocation *invocation, gpointer user_data) {
     int mode;
     g_variant_get(parameters, "(i)", &mode);
-    if (mode < 1 || mode > 3) {
+    if (mode < 1 || mode > 4) {
         g_dbus_method_invocation_return_error(invocation, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "Invalid mode: %d", mode);
         return TRUE;
     }
     g510s_data.mkey_state = mode;
     set_mkey_state(mode);
+    // No more dbus_mode assignment
+    emit_properties_changed(connection);
     g_dbus_method_invocation_return_value(invocation, NULL);
     return TRUE;
 }
@@ -98,6 +145,10 @@ static gboolean on_handle_set_color(GDBusConnection *connection, const gchar *se
         return TRUE;
     }
     setG510LEDColor(r, g, b);
+    g510s_data.led_red = r;
+    g510s_data.led_green = g;
+    g510s_data.led_blue = b;
+    emit_properties_changed(connection);
     g_dbus_method_invocation_return_value(invocation, NULL);
     return TRUE;
 }
@@ -126,6 +177,8 @@ static void on_bus_acquired(GDBusConnection *connection, const gchar *name, gpoi
         "      <arg type='i' name='blue' direction='in'/>"
         "    </method>"
         "    <method name='SaveConfig'/>"
+        "    <property name='Mode' type='i' access='read'/>"
+        "    <property name='Color' type='ai' access='read'/>"
         "  </interface>"
         "</node>";
 
@@ -138,8 +191,8 @@ static void on_bus_acquired(GDBusConnection *connection, const gchar *name, gpoi
         introspection_data->interfaces[0],
         &(GDBusInterfaceVTable){
             .method_call = on_method_call,
-            .get_property = NULL,
-            .set_property = NULL
+            .get_property = on_get_property,
+            .set_property = on_set_property
         },
         NULL, NULL, NULL);
 

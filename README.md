@@ -6,7 +6,7 @@ Graphical utility for Logitech G510 and G510s keyboards on Linux.
 
 ### OpenSUSE
 
-`sudo zypper in g510s libg15-devel libg15render-devel libappindicator3-devel`
+`sudo zypper in g510s libg15-devel libg15-1 libg15render3 libg15render-devel libappindicator3-devel`
 
 ## TODO
 
@@ -92,20 +92,33 @@ GRAPH,BAR,!115,!5,40,6,100,// printf %gpuval //
 78,30,C,0,1,// date "+%%H:%%M:%%S %%a %%b %%d" //
 ```
 
-## Fill demo
+## Fill Modes for Shapes
+
+For `RECT`, `ELLIPSE`, and `POLY`, the last argument (optional) controls the fill mode:
+
+* `0` or omitted: Outline only (default)
+* `1`: Filled (white)
+* `2`: Filled (black)
+* `3`: (POLY only) Filled and outline both black
+
+**Examples:**
 
 ```plaintext
 # Rectangle examples
 RECT,5,5,30,10           # Outline rectangle at (5,5), size 30x10
-!RECT,40,5,30,10         # Filled rectangle at (40,5), size 30x10
+RECT,40,5,30,10,1        # Filled rectangle (white)
+RECT,75,5,30,10,2        # Filled rectangle (black)
 
 # Ellipse examples
-ELLIPSE,20,25,12,6       # Outline ellipse centered at (20,25), rx=12, ry=6
-!ELLIPSE,55,25,12,6      # Filled ellipse centered at (55,25), rx=12, ry=6
+ELLIPSE,20,25,12,6       # Outline ellipse
+ELLIPSE,55,25,12,6,1     # Filled ellipse (white)
+ELLIPSE,90,25,12,6,2     # Filled ellipse (black)
 
 # Polygon examples (triangle)
-POLY,[(80,5);(100,20);(60,20)]      # Outline triangle
-!POLY,[(120,5);(140,20);(100,20)]   # Filled triangle
+POLY,[(80,5);(100,20);(60,20)]           # Outline triangle
+POLY,[(120,5);(140,20);(100,20)],1       # Filled triangle (white)
+POLY,[(120,25);(140,40);(100,40)],2      # Filled triangle (black)
+POLY,[(120,45);(140,60);(100,60)],3      # Filled and outline black (POLY only)
 ```
 
 ---

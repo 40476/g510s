@@ -176,13 +176,14 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
         if (line[0] == 0 || line[0] == '#') continue;
 
         // Rectangle: RECT,x,y,w,h[,fillmode] (filled or outline, fill controlled by fillmode)
-        int fill_shape = 0, black_fill = 0, fill_mode = 0;
+        int fill_shape = 0, black_fill = 0, fill_mode = 0, outline_black = 0;
         const char *shape_line = line;
         if (strncmp(shape_line, "RECT,", 5) == 0) {
             const char *p = shape_line + 5;
             char *tok;
             int x, y, w, h;
             fill_mode = 0;
+            outline_black = 0;
 
             tok = strtok((char*)p, ",");
             if (!tok) continue;
@@ -203,37 +204,40 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
             tok = strtok(NULL, ",");
             if (tok) fill_mode = atoi(tok); // Optional fill mode
 
-            if (fill_mode == 1) { fill_shape = 1; black_fill = 0; }
-            else if (fill_mode == 2) { fill_shape = 1; black_fill = 1; }
-            else { fill_shape = 0; black_fill = 0; }
+            if (fill_mode == 1) { fill_shape = 1; black_fill = 0; outline_black = 0; }
+            else if (fill_mode == 2) { fill_shape = 1; black_fill = 1; outline_black = 0; }
+            else if (fill_mode == 3) { fill_shape = 1; black_fill = 1; outline_black = 1; }
+            else { fill_shape = 0; black_fill = 0; outline_black = 0; }
 
             int color = black_fill ? 0 : 1;
             if (fill_shape) {
                 for (int dy = 0; dy < h; ++dy)
                     for (int dx = 0; dx < w; ++dx)
                         g15r_setPixel(canvas, x + dx, y + dy, color);
-            } else {
-                for (int dx = 0; dx < w; ++dx) {
-                    g15r_setPixel(canvas, x + dx, y, color);
-                    g15r_setPixel(canvas, x + dx, y + h - 1, color);
-                }
-                for (int dy = 0; dy < h; ++dy) {
-                    g15r_setPixel(canvas, x, y + dy, color);
-                    g15r_setPixel(canvas, x + w - 1, y + dy, color);
-                }
+            }
+            // Draw outline (always, but color depends on fill_mode)
+            int outline_color = outline_black ? 0 : 1;
+            for (int dx = 0; dx < w; ++dx) {
+                g15r_setPixel(canvas, x + dx, y, outline_color);
+                g15r_setPixel(canvas, x + dx, y + h - 1, outline_color);
+            }
+            for (int dy = 0; dy < h; ++dy) {
+                g15r_setPixel(canvas, x, y + dy, outline_color);
+                g15r_setPixel(canvas, x + w - 1, y + dy, outline_color);
             }
             rendered++;
             continue;
         }
 
         // Ellipse: ELLIPSE,x,y,rx,ry[,fillmode] (filled or outline, fill controlled by fillmode)
-        fill_shape = 0; black_fill = 0; fill_mode = 0;
+        fill_shape = 0; black_fill = 0; fill_mode = 0; outline_black = 0;
         shape_line = line;
         if (strncmp(shape_line, "ELLIPSE,", 8) == 0) {
             const char *p = shape_line + 8;
             char *tok;
             int x0, y0, rx, ry;
             fill_mode = 0;
+            outline_black = 0;
 
             tok = strtok((char*)p, ",");
             if (!tok) continue;
@@ -254,54 +258,56 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
             tok = strtok(NULL, ",");
             if (tok) fill_mode = atoi(tok);
 
-            if (fill_mode == 1) { fill_shape = 1; black_fill = 0; }
-            else if (fill_mode == 2) { fill_shape = 1; black_fill = 1; }
-            else { fill_shape = 0; black_fill = 0; }
+            if (fill_mode == 1) { fill_shape = 1; black_fill = 0; outline_black = 0; }
+            else if (fill_mode == 2) { fill_shape = 1; black_fill = 1; outline_black = 0; }
+            else if (fill_mode == 3) { fill_shape = 1; black_fill = 1; outline_black = 1; }
+            else { fill_shape = 0; black_fill = 0; outline_black = 0; }
 
             int color = black_fill ? 0 : 1;
-            if (!fill_shape) {
-                int a2 = rx * rx, b2 = ry * ry;
-                int x = 0, y = ry;
-                int dx = 2 * b2 * x, dy = 2 * a2 * y;
-                int err = b2 - a2 * ry + a2 / 4;
-                while (dx < dy) {
-                    g15r_setPixel(canvas, x0 + x, y0 + y, color);
-                    g15r_setPixel(canvas, x0 - x, y0 + y, color);
-                    g15r_setPixel(canvas, x0 + x, y0 - y, color);
-                    g15r_setPixel(canvas, x0 - x, y0 - y, color);
-                    if (err < 0) {
-                        x++;
-                        dx += 2 * b2;
-                        err += dx + b2;
-                    } else {
-                        x++; y--;
-                        dx += 2 * b2;
-                        dy -= 2 * a2;
-                        err += dx - dy + b2;
-                    }
-                }
-                err = b2 * (x + 0.5) * (x + 0.5) + a2 * (y - 1) * (y - 1) - a2 * b2;
-                while (y >= 0) {
-                    g15r_setPixel(canvas, x0 + x, y0 + y, color);
-                    g15r_setPixel(canvas, x0 - x, y0 + y, color);
-                    g15r_setPixel(canvas, x0 + x, y0 - y, color);
-                    g15r_setPixel(canvas, x0 - x, y0 - y, color);
-                    if (err > 0) {
-                        y--;
-                        dy -= 2 * a2;
-                        err += a2 - dy;
-                    } else {
-                        y--; x++;
-                        dx += 2 * b2;
-                        dy -= 2 * a2;
-                        err += dx - dy + a2;
-                    }
-                }
-            } else {
+            if (fill_shape) {
                 for (int y = -ry; y <= ry; ++y)
                     for (int x = -rx; x <= rx; ++x)
                         if ((x * x) * (ry * ry) + (y * y) * (rx * rx) <= (rx * rx) * (ry * ry))
                             g15r_setPixel(canvas, x0 + x, y0 + y, color);
+            }
+            // Draw outline (always, but color depends on fill_mode)
+            int outline_color = outline_black ? 0 : 1;
+            int a2 = rx * rx, b2 = ry * ry;
+            int x = 0, y = ry;
+            int dx = 2 * b2 * x, dy = 2 * a2 * y;
+            int err = b2 - a2 * ry + a2 / 4;
+            while (dx < dy) {
+                g15r_setPixel(canvas, x0 + x, y0 + y, outline_color);
+                g15r_setPixel(canvas, x0 - x, y0 + y, outline_color);
+                g15r_setPixel(canvas, x0 + x, y0 - y, outline_color);
+                g15r_setPixel(canvas, x0 - x, y0 - y, outline_color);
+                if (err < 0) {
+                    x++;
+                    dx += 2 * b2;
+                    err += dx + b2;
+                } else {
+                    x++; y--;
+                    dx += 2 * b2;
+                    dy -= 2 * a2;
+                    err += dx - dy + b2;
+                }
+            }
+            err = b2 * (x + 0.5) * (x + 0.5) + a2 * (y - 1) * (y - 1) - a2 * b2;
+            while (y >= 0) {
+                g15r_setPixel(canvas, x0 + x, y0 + y, outline_color);
+                g15r_setPixel(canvas, x0 - x, y0 + y, outline_color);
+                g15r_setPixel(canvas, x0 + x, y0 - y, outline_color);
+                g15r_setPixel(canvas, x0 - x, y0 - y, outline_color);
+                if (err > 0) {
+                    y--;
+                    dy -= 2 * a2;
+                    err += a2 - dy;
+                } else {
+                    y--; x++;
+                    dx += 2 * b2;
+                    dy -= 2 * a2;
+                    err += dx - dy + a2;
+                }
             }
             rendered++;
             continue;
@@ -350,6 +356,7 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
             else { fill_shape = 0; black_fill = 0; }
 
             int color = black_fill ? 0 : 1;
+            int outline_color = (fill_mode == 3) ? 0 : 1;
             if (fill_shape) {
                 // Simple polygon fill (scanline, not optimal for complex polygons)
                 int min_y = points[0][1], max_y = points[0][1];
@@ -382,33 +389,18 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                             for (int x = node_x[i]; x <= node_x[i + 1]; ++x)
                                 g15r_setPixel(canvas, x, y, color);
                 }
-                if (fill_mode == 3) {
-                    // Black out outline as well
-                    for (int i = 0; i < n_points; ++i) {
-                        int x1 = points[i][0];
-                        int y1 = points[i][1];
-                        int x2 = points[(i + 1) % n_points][0];
-                        int y2 = points[(i + 1) % n_points][1];
-                        g15r_drawLine(canvas, x1, y1, x2, y2, 0);
-                    }
-                } else {
-                    // Draw outline in normal color
-                    for (int i = 0; i < n_points; ++i) {
-                        int x1 = points[i][0];
-                        int y1 = points[i][1];
-                        int x2 = points[(i + 1) % n_points][0];
-                        int y2 = points[(i + 1) % n_points][1];
-                        g15r_drawLine(canvas, x1, y1, x2, y2, color);
-                    }
-                }
+            }
+            // Always draw outline, color depends on fill_mode
+            if (n_points == 2) {
+                // Draw a single line if only two points
+                g15r_drawLine(canvas, points[0][0], points[0][1], points[1][0], points[1][1], outline_color);
             } else {
-                // Draw outline only
                 for (int i = 0; i < n_points; ++i) {
                     int x1 = points[i][0];
                     int y1 = points[i][1];
                     int x2 = points[(i + 1) % n_points][0];
                     int y2 = points[(i + 1) % n_points][1];
-                    g15r_drawLine(canvas, x1, y1, x2, y2, color);
+                    g15r_drawLine(canvas, x1, y1, x2, y2, outline_color);
                 }
             }
             rendered++;

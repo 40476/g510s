@@ -147,3 +147,15 @@ POLY,[(120,45);(140,60);(100,60)],3      # Filled and outline black (POLY only)
   `10,20,L,0,8,// sensors | awk '/^Package id 0:/ {print int($4)}' //`
 * Show custom messages:  
   `80,10,C,0,8,// printf "Hello G510s!" //`
+
+## sus \/
+
+```plaintext
+RECT,40,15,10,15,0
+ELLIPSE,53,30,4,6,0
+ELLIPSE,60,30,4,6,0
+ELLIPSE,57,14,7,6,0
+RECT,49,15,16,17,2
+ELLIPSE,64,17,5,3,2
+POLY,[(50,15);(59,15)],3
+```

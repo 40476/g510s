@@ -54,8 +54,9 @@ WantedBy=default.target
 * `!` before **w**: Flip the X axis (draw right-to-left for bars/graphs).
 * `!` before **h**: Flip the Y axis (draw bottom-to-top for bars/graphs).
 * `^` removes all newlines from a command output
-* `%` defines and accesses a variable
-* `%%` is just a normal `%` sign
+* `%` defines a variable
+* `@` calls a variable
+* `@@` is just a normal `@` sign
 
 **You can combine these as needed.**
 
@@ -69,27 +70,26 @@ WantedBy=default.target
 %ramval // free | awk '/Mem:/ {print int($3/$2*100)}' //
 %gpuval // amdgpu_top -d --json | jq ".[0].gpu_activity.GFX.value" //
 
-
 # CPU usage graph
-GRAPH,LINE,0,4,160,35,100,// printf %cpuval //
+GRAPH,LINE,0,4,160,35,100,// printf @cpuval //
 
 # CPU meter
 5,13,L,0,0,// printf CPU //
-GRAPH,BAR,!5,!5,50,6,100,// printf %cpuval //
-55,13,R,0,0,^// echo -n "%cpuval%%" //
+GRAPH,BAR,!5,!5,50,6,100,// printf @cpuval //
+55,13,R,0,0,^// echo -n "@cpuval%" //
 
 # RAM usage
 60,13,L,0,0,// printf RAM //
-GRAPH,BAR,!60,!5,50,6,100,// printf %ramval //
-110,13,R,0,0,^// echo -n "%ramval%%" //
+GRAPH,BAR,!60,!5,50,6,100,// printf @ramval //
+110,13,R,0,0,^// echo -n "@ramval%" //
 
 # GPU usage
 115,13,L,0,0,// printf GPU //
-GRAPH,BAR,!115,!5,40,6,100,// printf %gpuval //
-155,13,R,0,0,^// echo -n "%gpuval%%" //
+GRAPH,BAR,!115,!5,40,6,100,// printf @gpuval //
+155,13,R,0,0,^// echo -n "@gpuval%" //
 
 # Date and time
-78,30,C,0,1,// date "+%%H:%%M:%%S %%a %%b %%d" //
+78,30,C,0,1,// date "+%H:%M:%S %a %b %d" //
 ```
 
 ## Fill Modes for Shapes

@@ -88,11 +88,11 @@ static void substitute_vars(char *line, script_var_t *vars, int var_count) {
     char buf[MAX_LINE_LEN * 2] = {0};
     char *src = line, *dst = buf;
     while (*src) {
-        if (*src == '%' && *(src+1) == '%') {
-            // %% -> %
-            *dst++ = '%';
+        if (*src == '@' && *(src+1) == '@') {
+            // @@ -> @
+            *dst++ = '@';
             src += 2;
-        } else if (*src == '%' && isalpha(*(src+1))) {
+        } else if (*src == '@' && isalpha(*(src+1))) {
             src++;
             char varname[MAX_VAR_NAME] = {0};
             int vi = 0;
@@ -133,7 +133,7 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
     while (fgets(line, sizeof(line), f)) {
         trim(line);
         if (line[0] == 0 || line[0] == '#') continue;
-
+        
         // --- Variable definition: %varname // command // ---
         if (line[0] == '%') {
             char *p = line + 1;

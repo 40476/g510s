@@ -19,8 +19,6 @@
  *  Copyright © 2025 usr_40476
  */
 
-
-#include <cmath>
 #include <stdlib.h>
 #include <pthread.h>
 #include <libg15.h>

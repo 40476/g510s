@@ -650,12 +650,6 @@ static void refresh_gui_internal() {
 }
 
 int main(int argc, char *argv[]) {
-  int i = 1;
-  int help = 0;
-  int debug = 0;
-  int opt_invalid = 0;
-  int dflag = 0;
-  
   pthread_t key_thread;
   pthread_t update_thread;
   pthread_t server_thread;
@@ -686,8 +680,7 @@ int main(int argc, char *argv[]) {
   
   // Debug mode
   if (flag_get_int(FlagDebug) != 0) {
-      debug = atoi(flag_get_int(FlagDebug));
-      libg15Debug(debug);
+      libg15Debug(flag_get_int(FlagDebug));
       printf("G510s: debugging enabled, level %i\n", debug);
   }
   

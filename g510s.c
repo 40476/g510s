@@ -676,7 +676,6 @@ int main(int argc, char *argv[]) {
   // Shows help menu
   if (flag_get_bool(FlagHelp)) {
       print_flag_usage(argv[0]);
-      break;
   }
   
   // Debug mode

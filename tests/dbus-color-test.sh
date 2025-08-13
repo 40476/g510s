@@ -11,7 +11,7 @@ while true; do
     r=${rgb[1]}
     g=${rgb[2]}
     b=${rgb[3]}
-    qdbus6 org.g510s.control /org/g510s/control org.g510s.control.SetColor $r $g $b > /dev/null
+    qdbus6 org.g510s.control /org/g510s/control org.g510s.control.SetColor $r $g $b false > /dev/null
     sleep $delay
   done
 done

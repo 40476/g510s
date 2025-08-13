@@ -19,7 +19,6 @@
  *  Copyright © 2025 usr_40476
  */
 
-
 #include <stdlib.h>
 #include <pthread.h>
 #include <libg15.h>
@@ -30,6 +29,7 @@
 #include <glib.h>    // Add for guint definition
 
 #include "g510s.h"
+#include "flagtool.h"
 
 // DBus interface and object path
 #define G510S_DBUS_NAME "org.g510s.control"
@@ -650,12 +650,7 @@ static void refresh_gui_internal() {
 }
 
 int main(int argc, char *argv[]) {
-  int i = 1;
-  int help = 0;
-  int debug = 0;
-  int opt_invalid = 0;
-  int dflag = 0;
-  
+  int debug;
   pthread_t key_thread;
   pthread_t update_thread;
   pthread_t server_thread;
@@ -671,48 +666,24 @@ int main(int argc, char *argv[]) {
   connected_clients = 0;
   current_key_state = 0;
   
-  // parse command line options
-  for (i = 1; i < argc; i++) {
-    if (!strcmp(argv[i],"--help") || !strcmp(argv[i],"-h")) {
-      help = 1;
-      break;
-    } else if (!strcmp(argv[i],"--debug") || !strcmp(argv[i],"-d")) {
-      if (argv[i+1] && !is_number(argv[i+1])) {
-        i++;
-        debug = atoi(argv[i]);
-        dflag++;
-      } else {
-        opt_invalid = 1;
-        break;
-      }
-    } else {
-      opt_invalid = 1;
-      break;
-    }
-    if (dflag > 1) {
-      opt_invalid = 1;
-      break;
-    }
+  // Register Flags
+  Flag *FlagHelp = flag_bool_multi(0, "Shows help menu", "--help", "-h", NULL);
+  Flag *FlagDebug = flag_int_multi(0, "Shows debug info", "--debug", "-d", NULL);
+  
+  // Parse Flags
+  flag_parse(argc, argv);
+  
+  // Shows help menu
+  if (flag_get_bool(FlagHelp)) {
+      print_flag_usage(argv[0]);
+      return 1;
   }
   
-  if (opt_invalid) {
-    printf("G510s: invalid option specified!\n\n");
-    help = 1;
-  }
-
-  // print help and exit
-  if (help) {
-    printf("Usage: g510s <option> <value>\n\n");
-    printf("Options:\n");
-    printf("  --help|-h\tShow this help\n");
-    printf("  --debug|-d\tSet debug level (default 0)\n");
-    return 0;
-  }
-
-  // enable debug
-  if (debug != 0) {
-    libg15Debug(debug);
-    printf("G510s: debugging enabled, level %i\n", debug);
+  // Debug mode
+  if (flag_get_int(FlagDebug) != 0) {
+      debug = flag_get_int(FlagDebug);
+      libg15Debug(debug);
+      printf("G510s: debugging enabled, level %i\n", debug);
   }
   
   // init libg15

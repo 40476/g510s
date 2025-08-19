@@ -667,8 +667,12 @@ int main(int argc, char *argv[]) {
   current_key_state = 0;
   
   // Register Flags
-  Flag *FlagHelp = flag_bool_multi(0, "Shows help menu", "--help", "-h", NULL);
-  Flag *FlagDebug = flag_int_multi(0, "Shows debug info", "--debug", "-d", NULL);
+  Flag *FlagHelp = flag_bool(0, "Shows help menu", "--help", "-h", NULL);
+  Flag *FlagDebug = flag_int(0, "Shows debug info", "--debug", "-d", NULL);
+  
+  // Grouping for help menu
+  FlagGroup *OutputGroup = create_flag_group("Output Flags");
+  add_flag_to_group(OutputGroup, FlagDebug);
   
   // Parse Flags
   flag_parse(argc, argv);
@@ -1024,6 +1028,9 @@ int main(int argc, char *argv[]) {
   
   // clean up lcdlist
   lcdlist_destroy(&lcdlist);
+  
+  // clean up flags
+  flags_cleanup();
   
   return 0;
 }

@@ -126,6 +126,10 @@ char *usb_id;
 unsigned int connected_clients;
 unsigned int current_key_state;
 
+// Terminal mode
+int terminal_mode;
+char terminal_cmd[1024];
+
 int init_uinput();
 void exit_uinput();
 void process_keys(lcdlist_t *displaylist, unsigned int key, unsigned int key_state);

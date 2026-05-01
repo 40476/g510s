@@ -40,6 +40,15 @@
 #define MAX_VAR_NAME 32
 #define MAX_VAR_VALUE 256
 
+// Terminal mode settings
+#define TERMINAL_FONT_SIZE 0  // Smallest font (3px wide)
+#define TERMINAL_CHAR_WIDTH 3  // Width of smallest font in pixels
+#define TERMINAL_CHAR_HEIGHT 5 // Height of smallest font in pixels
+#define DISPLAY_WIDTH 160      // G510s LCD width in pixels
+#define DISPLAY_HEIGHT 43      // G510s LCD height in pixels
+#define TERMINAL_COLS (DISPLAY_WIDTH / TERMINAL_CHAR_WIDTH)
+#define TERMINAL_ROWS (DISPLAY_HEIGHT / TERMINAL_CHAR_HEIGHT)
+
 typedef struct {
     char name[MAX_VAR_NAME];
     char value[MAX_VAR_VALUE];
@@ -640,6 +649,55 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
     return rendered;
 }
 
+// Terminal rendering function
+static void render_terminal_output(g15canvas *canvas) {
+    if (!terminal_cmd[0]) return;
+
+    // Set environment variables for terminal dimensions
+    char cols_str[32], rows_str[32];
+    snprintf(cols_str, sizeof(cols_str), "%d", TERMINAL_COLS);
+    snprintf(rows_str, sizeof(rows_str), "%d", TERMINAL_ROWS);
+    setenv("G510S_TERMINAL_COLS", cols_str, 1);
+    setenv("G510S_TERMINAL_ROWS", rows_str, 1);
+    setenv("G510S_TERMINAL_MODE", "1", 1);
+    setenv("TERM", "g510s-terminal", 1);
+
+    // Report dimensions to stdout
+    printf("G510s Terminal: %dx%d characters (font %dx%d px)\n", 
+           TERMINAL_COLS, TERMINAL_ROWS, TERMINAL_CHAR_WIDTH, TERMINAL_CHAR_HEIGHT);
+    printf("G510s Terminal command: %s\n", terminal_cmd);
+
+    // Execute command and capture output
+    FILE *fp = popen(terminal_cmd, "r");
+    if (!fp) {
+        g15r_renderString(canvas, (unsigned char *)"Cmd error", 0, TERMINAL_FONT_SIZE, 0, 0);
+        return;
+    }
+
+    char line[TERMINAL_COLS + 1];
+    int row = 0;
+    int y_pos = 0;
+
+    while (fgets(line, sizeof(line), fp) && row < TERMINAL_ROWS) {
+        // Trim newline
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+            line[--len] = '\0';
+        }
+
+        // Render line at small font size
+        g15r_renderString(canvas, (unsigned char *)line, 0, TERMINAL_FONT_SIZE, 0, y_pos);
+        row++;
+        y_pos += TERMINAL_CHAR_HEIGHT;
+    }
+    pclose(fp);
+
+    // If no output, show message
+    if (row == 0) {
+        g15r_renderString(canvas, (unsigned char *)"No output", 0, TERMINAL_FONT_SIZE, 0, 0);
+    }
+}
+
 void digital_clock(lcd_t *lcd) {
     time_t currtime = time(NULL);
 
@@ -656,47 +714,52 @@ void digital_clock(lcd_t *lcd) {
         canvas->mode_reverse = 0;
         canvas->mode_xor = 0;
 
-        // Try to render from script file
-        char user[64] = {0};
-        FILE *fp = popen("whoami", "r");
-        if (fp && fgets(user, sizeof(user), fp)) {
-            size_t len = strlen(user);
-            if (len > 0 && (user[len - 1] == '\n' || user[len - 1] == '\r')) user[len - 1] = '\0';
-        }
-        if (fp) pclose(fp);
-        char script_path[256];
-        snprintf(script_path, sizeof(script_path), "/home/%s/.config/g510s/display.txt", user);
-        int rendered = render_scripted_display(canvas, script_path);
-
-        if (!rendered) {
-            char hour_buf[3];
-            char min_buf[3];
-            memset(hour_buf, 0, 3);
-            memset(min_buf, 0, 3);
-
-            // 12 hour format
-            if (!g510s_data.clock_mode) {
-                char ampm_buf[3];
-                memset(ampm_buf, 0, 3);
-                strftime(hour_buf, 3, "%l", localtime(&currtime));
-                strftime(ampm_buf, 3, "%p", localtime(&currtime));
-                g15r_renderString(canvas, (unsigned char *)ampm_buf, 0, G15_TEXT_LARGE, 135, 26);
-            } else { // 24 hour format
-                strftime(hour_buf, 3, "%H", localtime(&currtime));
+        // Terminal mode: run command and display output
+        if (terminal_mode) {
+            render_terminal_output(canvas);
+        } else {
+            // Try to render from script file
+            char user[64] = {0};
+            FILE *fp = popen("whoami", "r");
+            if (fp && fgets(user, sizeof(user), fp)) {
+                size_t len = strlen(user);
+                if (len > 0 && (user[len - 1] == '\n' || user[len - 1] == '\r')) user[len - 1] = '\0';
             }
-            g15r_renderString(canvas, (unsigned char *)hour_buf, 0, 39, 30, 2);
-            //g15r_G15FPrint(canvas, ":", 77, -3, 39, 0, 1, 0);
+            if (fp) pclose(fp);
+            char script_path[256];
+            snprintf(script_path, sizeof(script_path), "/home/%s/.config/g510s/display.txt", user);
+            int rendered = render_scripted_display(canvas, script_path);
 
-            // minute
-            strftime(min_buf, 3, "%M", localtime(&currtime));
-            g15r_renderString(canvas, (unsigned char *)min_buf, 0, 39, 86, 2);
+            if (!rendered) {
+                char hour_buf[3];
+                char min_buf[3];
+                memset(hour_buf, 0, 3);
+                memset(min_buf, 0, 3);
 
-            // date string
-            if (g510s_data.show_date) {
-                char date_buf[40];
-                memset(date_buf, 0, 40);
-                strftime(date_buf, 40, "%A %B %e %Y", localtime(&currtime));
-                g15r_renderString(canvas, (unsigned char *)date_buf, 0, G15_TEXT_MED, 80 - ((strlen(date_buf) * 5) / 2), 35);
+                // 12 hour format
+                if (!g510s_data.clock_mode) {
+                    char ampm_buf[3];
+                    memset(ampm_buf, 0, 3);
+                    strftime(hour_buf, 3, "%l", localtime(&currtime));
+                    strftime(ampm_buf, 3, "%p", localtime(&currtime));
+                    g15r_renderString(canvas, (unsigned char *)ampm_buf, 0, G15_TEXT_LARGE, 135, 26);
+                } else { // 24 hour format
+                    strftime(hour_buf, 3, "%H", localtime(&currtime));
+                }
+                g15r_renderString(canvas, (unsigned char *)hour_buf, 0, 39, 30, 2);
+                //g15r_G15FPrint(canvas, ":", 77, -3, 39, 0, 1, 0);
+
+                // minute
+                strftime(min_buf, 3, "%M", localtime(&currtime));
+                g15r_renderString(canvas, (unsigned char *)min_buf, 0, 39, 86, 2);
+
+                // date string
+                if (g510s_data.show_date) {
+                    char date_buf[40];
+                    memset(date_buf, 0, 40);
+                    strftime(date_buf, 40, "%A %B %e %Y", localtime(&currtime));
+                    g15r_renderString(canvas, (unsigned char *)date_buf, 0, G15_TEXT_MED, 80 - ((strlen(date_buf) * 5) / 2), 35);
+                }
             }
         }
 

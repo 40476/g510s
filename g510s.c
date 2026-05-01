@@ -656,6 +656,10 @@ int main(int argc, char *argv[]) {
   int opt_invalid = 0;
   int dflag = 0;
   
+  // Initialize terminal mode
+  terminal_mode = 0;
+  terminal_cmd[0] = '\0';
+  
   pthread_t key_thread;
   pthread_t update_thread;
   pthread_t server_thread;
@@ -685,6 +689,26 @@ int main(int argc, char *argv[]) {
         opt_invalid = 1;
         break;
       }
+    } else if (!strcmp(argv[i],"--terminal")) {
+      terminal_mode = 1;
+      // Capture the rest of the command line as the terminal command
+      if (argv[i+1]) {
+        // Skip past --terminal flag
+        i++;
+        // Copy first argument
+        strncpy(terminal_cmd, argv[i], sizeof(terminal_cmd)-1);
+        terminal_cmd[sizeof(terminal_cmd)-1] = '\0';
+        i++;
+        // Append remaining arguments
+        while (i < argc) {
+          strncat(terminal_cmd, " ", sizeof(terminal_cmd)-strlen(terminal_cmd)-1);
+          strncat(terminal_cmd, argv[i], sizeof(terminal_cmd)-strlen(terminal_cmd)-1);
+          i++;
+        }
+      } else {
+        opt_invalid = 1;
+        break;
+      }
     } else {
       opt_invalid = 1;
       break;
@@ -706,6 +730,7 @@ int main(int argc, char *argv[]) {
     printf("Options:\n");
     printf("  --help|-h\tShow this help\n");
     printf("  --debug|-d\tSet debug level (default 0)\n");
+    printf("  --terminal <cmd>\tRun command and display output on LCD using small font\n");
     return 0;
   }
 

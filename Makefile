@@ -61,5 +61,6 @@ clean:
 	-rm -f g510s-list.o
 	-rm -f g510s-misc.o
 	-rm -f g510s-net.o
+	-rm -f g510s-display.o
 	-rm -f g510s-signals.o
 	-rm -f g510s-threads.o

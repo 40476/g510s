@@ -30,8 +30,33 @@
 #include <unistd.h>
 #include <math.h>
 #include <ctype.h> // For isalnum
+#include <pty.h>
+#include <utmp.h>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <signal.h>
+#include <fcntl.h>
+#include <errno.h>
 
 #include "g510s.h"
+
+// Define terminal variables (declared as extern in g510s.h)
+extern int terminal_mode;
+extern char terminal_cmd[1024];
+
+int terminal_fd = -1;
+pid_t terminal_pid = 0;
+char terminal_buffer[10240];
+int terminal_buf_start = 0;
+int terminal_buf_len = 0;
+int terminal_cursor_row = 0;
+int terminal_cursor_col = 0;
+pthread_mutex_t terminal_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+int terminal_keyboard_mode = 0;
+
+struct timeval l1_press_time;
+int l1_pressed = 0;
 
 #define MAX_SCRIPT_LINES 32
 #define MAX_LINE_LEN 256
@@ -496,7 +521,6 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                     }
                     // Flip Y (for vertical bars, not standard, but for completeness)
                     if (flip_y) {
-                        int tmp = fill_y0;
                         fill_y0 = y + h - 1 - (outline_y ? 1 : 0);
                         fill_y1 = y + h - fill_w;
                     }
@@ -649,52 +673,262 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
     return rendered;
 }
 
-// Terminal rendering function
-static void render_terminal_output(g15canvas *canvas) {
-    if (!terminal_cmd[0]) return;
+// Terminal emulator functions
 
-    // Set environment variables for terminal dimensions
-    char cols_str[32], rows_str[32];
-    snprintf(cols_str, sizeof(cols_str), "%d", TERMINAL_COLS);
-    snprintf(rows_str, sizeof(rows_str), "%d", TERMINAL_ROWS);
-    setenv("G510S_TERMINAL_COLS", cols_str, 1);
-    setenv("G510S_TERMINAL_ROWS", rows_str, 1);
-    setenv("G510S_TERMINAL_MODE", "1", 1);
-    setenv("TERM", "g510s-terminal", 1);
+// Ensure necessary fcntl constants are defined
+#ifndef F_GETFL
+#define F_GETFL 3
+#endif
+#ifndef F_SETFL
+#define F_SETFL 4
+#endif
+#ifndef O_NONBLOCK
+#define O_NONBLOCK 04000
+#endif
 
-    // Report dimensions to stdout
-    printf("G510s Terminal: %dx%d characters (font %dx%d px)\n", 
-           TERMINAL_COLS, TERMINAL_ROWS, TERMINAL_CHAR_WIDTH, TERMINAL_CHAR_HEIGHT);
-    printf("G510s Terminal command: %s\n", terminal_cmd);
+void init_terminal() {
+    pthread_mutex_lock(&terminal_mutex);
+    
+    if (terminal_fd >= 0) {
+        pthread_mutex_unlock(&terminal_mutex);
+        return; // Already initialized
+    }
 
-    // Execute command and capture output
-    FILE *fp = popen(terminal_cmd, "r");
-    if (!fp) {
-        g15r_renderString(canvas, (unsigned char *)"Cmd error", 0, TERMINAL_FONT_SIZE, 0, 0);
+    // Set up PTY
+    int master_fd;
+    pid_t pid = forkpty(&master_fd, NULL, NULL, NULL);
+    
+    if (pid < 0) {
+        printf("G510s: failed to forkpty\n");
+        pthread_mutex_unlock(&terminal_mutex);
         return;
     }
-
-    char line[TERMINAL_COLS + 1];
-    int row = 0;
-    int y_pos = 0;
-
-    while (fgets(line, sizeof(line), fp) && row < TERMINAL_ROWS) {
-        // Trim newline
-        size_t len = strlen(line);
-        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
-            line[--len] = '\0';
+    
+    if (pid == 0) {
+        // Child process - run shell
+        setenv("TERM", "dumb", 1);  // Use "dumb" terminal to minimize escape sequences
+        setenv("ROWS", "8", 1);
+        setenv("COLS", "53", 1);
+        setenv("PS1", "$ ", 1);  // Simple prompt
+        setenv("PS2", "", 1);
+        
+        // Run the configured terminal command, or use $SHELL, or fall back to /bin/sh
+        if (terminal_cmd[0]) {
+            execl("/bin/sh", "sh", "-c", terminal_cmd, (char *)NULL);
+        } else {
+            char *shell = getenv("SHELL");
+            if (shell && shell[0]) {
+                // Try to avoid reading startup files for bash
+                if (strstr(shell, "bash") != NULL) {
+                    execl(shell, "bash", "--norc", "--noprofile", (char *)NULL);
+                } else {
+                    execl(shell, shell, (char *)NULL);
+                }
+            } else {
+                execl("/bin/sh", "sh", (char *)NULL);
+            }
         }
-
-        // Render line at small font size
-        g15r_renderString(canvas, (unsigned char *)line, 0, TERMINAL_FONT_SIZE, 0, y_pos);
-        row++;
-        y_pos += TERMINAL_CHAR_HEIGHT;
+        _exit(1);
     }
-    pclose(fp);
+    
+    // Parent process
+    terminal_fd = master_fd;
+    terminal_pid = pid;
+    terminal_buf_start = 0;
+    terminal_buf_len = 0;
+    terminal_cursor_row = 0;
+    terminal_cursor_col = 0;
+    
+    // Clear the terminal buffer
+    memset(terminal_buffer, 0, sizeof(terminal_buffer));
+    
+    // Set non-blocking
+    int flags = fcntl(terminal_fd, F_GETFL, 0);
+    if (flags != -1) {
+        fcntl(terminal_fd, F_SETFL, flags | O_NONBLOCK);
+    }
+    
+    printf("G510s: Terminal started with PID %d, FD %d\n", pid, master_fd);
+    pthread_mutex_unlock(&terminal_mutex);
+}
 
-    // If no output, show message
-    if (row == 0) {
-        g15r_renderString(canvas, (unsigned char *)"No output", 0, TERMINAL_FONT_SIZE, 0, 0);
+void close_terminal() {
+    pthread_mutex_lock(&terminal_mutex);
+    
+    if (terminal_fd >= 0) {
+        close(terminal_fd);
+        if (terminal_pid > 0) {
+            kill(terminal_pid, SIGTERM);
+            terminal_pid = 0;
+        }
+        terminal_fd = -1;
+        terminal_buf_len = 0;
+        terminal_buf_start = 0;
+    }
+    
+    pthread_mutex_unlock(&terminal_mutex);
+}
+
+static void read_terminal_output() {
+    if (terminal_fd < 0) return;
+    
+    pthread_mutex_lock(&terminal_mutex);
+    
+    char buf[1024];
+    ssize_t n;
+    
+    while ((n = read(terminal_fd, buf, sizeof(buf) - 1)) > 0) {
+        for (ssize_t i = 0; i < n; i++) {
+            // Handle circular buffer
+            int pos = (terminal_buf_start + terminal_buf_len) % sizeof(terminal_buffer);
+            terminal_buffer[pos] = buf[i];
+            if (terminal_buf_len < (int)sizeof(terminal_buffer)) {
+                terminal_buf_len++;
+            } else {
+                terminal_buf_start = (terminal_buf_start + 1) % sizeof(terminal_buffer);
+            }
+        }
+    }
+    
+    pthread_mutex_unlock(&terminal_mutex);
+}
+
+static void render_terminal(g15canvas *canvas) {
+    pthread_mutex_lock(&terminal_mutex);
+    
+    if (terminal_fd < 0) {
+        g15r_renderString(canvas, (unsigned char *)"Terminal closed", 0, TERMINAL_FONT_SIZE, 0, 0);
+        pthread_mutex_unlock(&terminal_mutex);
+        return;
+    }
+    
+    // Read any new output
+    pthread_mutex_unlock(&terminal_mutex);
+    read_terminal_output();
+    pthread_mutex_lock(&terminal_mutex);
+    
+    // Parse buffer into lines for display (filter ANSI escape sequences)
+    char lines[TERMINAL_ROWS][TERMINAL_COLS + 1];
+    for (int i = 0; i < TERMINAL_ROWS; i++) {
+        memset(lines[i], 0, TERMINAL_COLS + 1);
+    }
+    
+    int line_num = 0;
+    int col_num = 0;
+    int buf_pos = terminal_buf_start;
+    int esc_state = 0;  // 0=normal, 1=got ESC, 2=got CSI [ , 3=got OSC ]
+    // esc_state 2: skip until final byte (0x40-0x7e)
+    
+    for (int i = 0; i < terminal_buf_len && line_num < TERMINAL_ROWS; i++) {
+        unsigned char c = (unsigned char)terminal_buffer[buf_pos];
+        buf_pos = (buf_pos + 1) % sizeof(terminal_buffer);
+        
+        // Handle ANSI escape sequences
+        if (esc_state == 1) {
+            if (c == '[') {
+                esc_state = 2;  // CSI sequence
+                continue;
+            } else if (c == ']') {
+                esc_state = 3;  // OSC sequence
+                continue;
+            } else if (c == '(' || c == ')') {
+                // Designate character set - skip next char
+                esc_state = 4;
+                continue;
+            } else {
+                // Not a recognized escape sequence, treat as normal
+                esc_state = 0;
+            }
+        }
+        
+        if (esc_state == 2) {
+            // CSI sequence: skip until we get a final byte (0x40-0x7e)
+            // Parameter bytes: 0x30-0x3f, Intermediate: 0x20-0x2f
+            if (c >= 0x40 && c <= 0x7e) {
+                esc_state = 0;  // End of CSI
+            }
+            continue;
+        }
+        
+        if (esc_state == 3) {
+            // OSC mode - skip until BEL (0x07) or ST (ESC \)
+            if (c == 0x07) {
+                esc_state = 0;
+            } else if (c == 0x1b) {
+                // Possibly start of ST (ESC \)
+                esc_state = 5;  // Expect backslash next
+            }
+            continue;
+        }
+        
+        if (esc_state == 4) {
+            // Skip one char after ESC ( or ESC )
+            esc_state = 0;
+            continue;
+        }
+        
+        if (esc_state == 5) {
+            if (c == '\\') {
+                esc_state = 0;
+            } else {
+                // Not ST, maybe something else, reset
+                esc_state = 0;
+            }
+            continue;
+        }
+        
+        if (c == 0x1b) {
+            // Start of escape sequence
+            esc_state = 1;
+            continue;
+        }
+        
+        if (c == '\n' || c == '\r') {
+            line_num++;
+            col_num = 0;
+            if (c == '\n') {
+                // Skip possible \r after \n
+                if (i + 1 < terminal_buf_len) {
+                    char next = terminal_buffer[buf_pos];
+                    if (next == '\r') {
+                        buf_pos = (buf_pos + 1) % sizeof(terminal_buffer);
+                        i++;
+                    }
+                }
+            }
+        } else if (c == '\t') {
+            // Tab - move to next multiple of 4
+            int spaces = 4 - (col_num % 4);
+            for (int s = 0; s < spaces && col_num < TERMINAL_COLS; s++) {
+                lines[line_num][col_num++] = ' ';
+            }
+        } else if (c >= 32 && c < 127) {
+            // Printable character
+            if (col_num < TERMINAL_COLS) {
+                lines[line_num][col_num++] = c;
+            }
+        }
+        // Ignore other control characters for simplicity
+    }
+    
+    // Display the last TERMINAL_ROWS lines
+    int start_line = (line_num >= TERMINAL_ROWS) ? line_num - TERMINAL_ROWS + 1 : 0;
+    int display_row = 0;
+    
+    for (int i = start_line; i <= line_num && display_row < TERMINAL_ROWS; i++) {
+        if (lines[i][0] || display_row == 0) { // Show empty lines at start for prompt
+            g15r_renderString(canvas, (unsigned char *)lines[i], 0, TERMINAL_FONT_SIZE, 0, display_row * TERMINAL_CHAR_HEIGHT);
+            display_row++;
+        }
+    }
+    
+    pthread_mutex_unlock(&terminal_mutex);
+}
+
+// Send input to terminal
+void terminal_send_input(const char *input, size_t len) {
+    if (terminal_fd >= 0) {
+        write(terminal_fd, input, len);
     }
 }
 
@@ -716,7 +950,7 @@ void digital_clock(lcd_t *lcd) {
 
         // Terminal mode: run command and display output
         if (terminal_mode) {
-            render_terminal_output(canvas);
+            render_terminal(canvas);
         } else {
             // Try to render from script file
             char user[64] = {0};

@@ -31,6 +31,10 @@
 
 #include "g510s.h"
 
+// Terminal mode variables (referenced in this file)
+int terminal_mode = 0;
+char terminal_cmd[1024] = {0};
+
 // DBus interface and object path
 #define G510S_DBUS_NAME "org.g510s.control"
 #define G510S_DBUS_PATH "/org/g510s/control"

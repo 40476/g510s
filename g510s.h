@@ -22,6 +22,23 @@
 
 #define G510S_VERSION "0.1.0"
 
+// Macros used in g510s-clock.c
+#define MAX_SCRIPT_LINES 32
+#define MAX_LINE_LEN 256
+#define MAX_CMD_OUTPUT 256
+#define MAX_SCRIPT_VARS 32
+#define MAX_VAR_NAME 32
+#define MAX_VAR_VALUE 256
+
+// Terminal display settings
+#define TERMINAL_FONT_SIZE 0
+#define TERMINAL_CHAR_WIDTH 3
+#define TERMINAL_CHAR_HEIGHT 5
+#define DISPLAY_WIDTH 160
+#define DISPLAY_HEIGHT 43
+#define TERMINAL_COLS (DISPLAY_WIDTH / TERMINAL_CHAR_WIDTH)
+#define TERMINAL_ROWS (DISPLAY_HEIGHT / TERMINAL_CHAR_HEIGHT)
+
 #ifndef SO_PRIORITY
 #define SO_PRIORITY 12
 #endif
@@ -126,9 +143,32 @@ char *usb_id;
 unsigned int connected_clients;
 unsigned int current_key_state;
 
-// Terminal mode
-int terminal_mode;
-char terminal_cmd[1024];
+// Terminal mode (declared as extern, defined in g510s-clock.c)
+extern int terminal_mode;
+extern char terminal_cmd[1024];
+
+// Terminal emulator state (declared as extern, defined in g510s-clock.c)
+extern int terminal_fd;  // PTY file descriptor
+extern pid_t terminal_pid;  // Shell process ID
+extern char terminal_buffer[1024 * 10];  // Scrollback buffer (10KB)
+extern int terminal_buf_start;  // Circular buffer start
+extern int terminal_buf_len;  // Current buffer length
+extern int terminal_cursor_row;  // Current cursor position
+extern int terminal_cursor_col;
+extern pthread_mutex_t terminal_mutex;  // Protect terminal state
+
+// Terminal keyboard mode (when active, G-keys send input to terminal)
+extern int terminal_keyboard_mode;
+
+// L1 key timing for short/long press detection
+#include <sys/time.h>  // for struct timeval
+extern struct timeval l1_press_time;
+extern int l1_pressed;
+#define L1_LONG_PRESS_MS 500  // 500ms for long press
+
+// Terminal functions
+void init_terminal();
+void close_terminal();
 
 int init_uinput();
 void exit_uinput();

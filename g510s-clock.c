@@ -79,6 +79,28 @@ typedef struct {
     char value[MAX_VAR_VALUE];
 } script_var_t;
 
+
+// Simple hash function to uniquely identify a graph by its command string
+static unsigned int hash_cmd(const char *str) {
+    unsigned int hash = 5381;
+    int c;
+    while ((c = *str++))
+        hash = ((hash << 5) + hash) + c; 
+    return hash;
+}
+
+typedef struct {
+    unsigned int id;           // Hash of the command
+    int values[256];
+    int pos;
+    int filled;
+    int last_update;           // To detect if a graph is no longer in the script
+} graph_buffer_t;
+
+static graph_buffer_t g_buffers[MAX_SCRIPT_LINES];
+static int total_buffers = 0;
+
+
 static void trim(char *str) {
     char *end;
     while(*str == ' ' || *str == '\t') str++;
@@ -153,22 +175,25 @@ static void substitute_vars(char *line, script_var_t *vars, int var_count) {
 
 static int render_scripted_display(g15canvas *canvas, const char *filepath) {
     FILE *f = fopen(filepath, "r");
-    if (!f) return 0; // file not found
+    if (!f) return 0;
 
     char line[MAX_LINE_LEN];
+    char raw_line_copy[MAX_LINE_LEN]; // Store original line for hashing
     int rendered = 0;
-    static int last_line_y[MAX_SCRIPT_LINES] = {0}; // For line graph state
 
     // --- Variable storage ---
     script_var_t vars[MAX_SCRIPT_VARS];
     int var_count = 0;
-    // --- End variable storage ---
 
     while (fgets(line, sizeof(line), f)) {
         trim(line);
         if (line[0] == 0 || line[0] == '#') continue;
-        
-        // --- Variable definition: %varname // command // ---
+
+        // --- 1. Save the RAW line before substitution for stable Hashing ---
+        strncpy(raw_line_copy, line, MAX_LINE_LEN - 1);
+        raw_line_copy[MAX_LINE_LEN - 1] = 0;
+
+        // --- Variable definition ---
         if (line[0] == '%') {
             char *p = line + 1;
             char varname[MAX_VAR_NAME] = {0};
@@ -178,27 +203,21 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
             }
             varname[vi] = 0;
             while (*p == ' ' || *p == '\t') p++;
-            // Look for // ... //
             char *cmd_start = strstr(p, "//");
             if (!*varname || !cmd_start) continue;
             cmd_start += 2;
             char *cmd_end = strstr(cmd_start, "//");
             if (!cmd_end) continue;
             *cmd_end = 0;
-            char *cmd = cmd_start;
             char output[MAX_VAR_VALUE] = {0};
-            exec_cmd(cmd, output, sizeof(output));
-            // Remove trailing newlines
+            exec_cmd(cmd_start, output, sizeof(output));
             size_t outlen = strlen(output);
             while (outlen > 0 && (output[outlen - 1] == '\n' || output[outlen - 1] == '\r')) {
                 output[--outlen] = '\0';
             }
-            // Store variable
             if (var_count < MAX_SCRIPT_VARS) {
                 strncpy(vars[var_count].name, varname, MAX_VAR_NAME-1);
-                vars[var_count].name[MAX_VAR_NAME-1] = 0;
                 strncpy(vars[var_count].value, output, MAX_VAR_VALUE-1);
-                vars[var_count].value[MAX_VAR_VALUE-1] = 0;
                 var_count++;
             }
             continue;
@@ -484,9 +503,14 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                 char *cmd = cmd_start + 2;
                 char output[MAX_CMD_OUTPUT] = {0};
                 exec_cmd(cmd, output, sizeof(output));
-                int percent = atoi(output);
-                if (percent < 0) percent = 0;
-                if (percent > 100) percent = 100;
+                int value = atoi(output);
+                
+                // Clamp to 0-100 only for BAR and PIE graphs
+                int percent = value;
+                if (strcasecmp(type, "BAR") == 0 || strcasecmp(type, "PIE") == 0) {
+                    if (percent < 0) percent = 0;
+                    if (percent > 100) percent = 100;
+                }
 
                 // Flip X axis if ! before w
                 int x0 = x, y0 = y, w0 = w, h0 = h;
@@ -572,35 +596,91 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                         }
                     }
                 } else if (strcasecmp(type, "LINE") == 0) {
-                    static int line_points[MAX_SCRIPT_LINES][256] = {{0}};
-                    static int line_pos[MAX_SCRIPT_LINES] = {0};
-                    int idx = rendered % MAX_SCRIPT_LINES;
-                    int px = x;
-                    int py = y + h - (h * percent / 100);
+                    // 1. Identify the buffer using the raw command string (before @ substitution)
+                    unsigned int id = hash_cmd(raw_line_copy);
+                    int buf_idx = -1;
 
-                    int pos = line_pos[idx];
-                    if (w > 255) w = 255;
-                    line_points[idx][pos] = py;
-                    line_pos[idx] = (pos + 1) % w;
+                    for (int i = 0; i < total_buffers; i++) {
+                        if (g_buffers[i].id == id) { buf_idx = i; break; }
+                    }
 
-                    // Flip X axis for line graph
-                    for (int i = 0; i < w - 1; ++i) {
-                        int p1 = (pos + 1 + i) % w;
-                        int p2 = (pos + 2 + i) % w;
-                        int x1 = x + (flip_x ? (w - 1 - i) : i);
-                        int x2 = x + (flip_x ? (w - 2 - i) : i + 1);
-                        int y1 = line_points[idx][p1];
-                        int y2 = line_points[idx][p2];
-                        int dx = abs(x2 - x1), sx = x1 < x2 ? 1 : -1;
-                        int dy = -abs(y2 - y1), sy = y1 < y2 ? 1 : -1;
-                        int err = dx + dy, e2;
-                        int cx = x1, cy = y1;
-                        while (1) {
-                            g15r_setPixel(canvas, cx, cy, 1);
-                            if (cx == x2 && cy == y2) break;
-                            e2 = 2 * err;
-                            if (e2 >= dy) { err += dy; cx += sx; }
-                            if (e2 <= dx) { err += dx; cy += sy; }
+                    if (buf_idx == -1 && total_buffers < MAX_SCRIPT_LINES) {
+                        buf_idx = total_buffers++;
+                        g_buffers[buf_idx].id = id;
+                        g_buffers[buf_idx].pos = 0;
+                        g_buffers[buf_idx].filled = 0;
+                        memset(g_buffers[buf_idx].values, 0, sizeof(int) * 256);
+                    }
+
+                    if (buf_idx != -1) {
+                        graph_buffer_t *gb = &g_buffers[buf_idx];
+                        int cur_w = (w > 255) ? 255 : (w < 2 ? 2 : w);
+                        int cur_h = (h < 2) ? 2 : h;
+
+                        // Parse the optional max_val parameter (the value after h)
+                        int max_val = 0;
+                        tok = strtok(NULL, ",");
+                        if (tok) max_val = atoi(tok);
+
+                        // 2. Add current data point
+                        gb->values[gb->pos] = percent;
+                        gb->pos = (gb->pos + 1) % cur_w;
+                        if (gb->pos == 0) gb->filled = 1;
+
+                        // 3. Scaling Logic (0 = Auto, else = Fixed)
+                        int current_min, current_max;
+                        int limit = gb->filled ? cur_w : gb->pos;
+
+                        if (max_val == 0) { 
+                            // AUTO-SCALE MODE: Find range from history
+                            current_min = gb->values[0];
+                            current_max = gb->values[0];
+                            for (int i = 1; i < limit; i++) {
+                                if (gb->values[i] < current_min) current_min = gb->values[i];
+                                if (gb->values[i] > current_max) current_max = gb->values[i];
+                            }
+                        } else {
+                            // FIXED MODE: Scale 0 to max_val
+                            current_min = 0;
+                            current_max = max_val;
+                        }
+
+                        int range = (current_max <= current_min) ? 1 : (current_max - current_min);
+
+                        // 4. Draw the lines
+                        for (int i = 0; i < limit - 1; ++i) {
+                            // Map sequence: Oldest to Newest
+                            int p1 = (gb->filled) ? (gb->pos + i) % cur_w : i;
+                            int p2 = (gb->filled) ? (gb->pos + i + 1) % cur_w : i + 1;
+
+                            int v1 = gb->values[p1];
+                            int v2 = gb->values[p2];
+
+                            // Map values to pixel heights
+                            int scaled1 = (v1 - current_min) * (cur_h - 1) / range;
+                            int scaled2 = (v2 - current_min) * (cur_h - 1) / range;
+
+                            // Handle Y-axis Flip (!)
+                            int y1, y2;
+                            if (flip_y) {
+                                // Flipped: High values at bottom
+                                y1 = y + scaled1;
+                                y2 = y + scaled2;
+                            } else {
+                                // Standard: High values at top
+                                y1 = y + cur_h - 1 - scaled1;
+                                y2 = y + cur_h - 1 - scaled2;
+                            }
+
+                            // Handle X-axis Flip (!)
+                            int x1 = x + (flip_x ? (limit - 1 - i) : i);
+                            int x2 = x + (flip_x ? (limit - 2 - i) : i + 1);
+
+                            // Clamping
+                            if (y1 < y) y1 = y; if (y1 >= y + cur_h) y1 = y + cur_h - 1;
+                            if (y2 < y) y2 = y; if (y2 >= y + cur_h) y2 = y + cur_h - 1;
+
+                            g15r_drawLine(canvas, x1, y1, x2, y2, 1);
                         }
                     }
                 }

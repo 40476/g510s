@@ -58,12 +58,12 @@ int terminal_keyboard_mode = 0;
 struct timeval l1_press_time;
 int l1_pressed = 0;
 
-#define MAX_SCRIPT_LINES 32
-#define MAX_LINE_LEN 256
-#define MAX_CMD_OUTPUT 256
+#define MAX_SCRIPT_LINES 128
+#define MAX_LINE_LEN 4096
+#define MAX_CMD_OUTPUT 2048
 #define MAX_SCRIPT_VARS 32
 #define MAX_VAR_NAME 32
-#define MAX_VAR_VALUE 256
+#define MAX_VAR_VALUE 1024
 
 // Terminal mode settings
 #define TERMINAL_FONT_SIZE 0  // Smallest font (3px wide)
@@ -462,7 +462,7 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
 
         // Graph/bar/pie/line: GRAPH,TYPE,x,y,w,h,// shell-cmd // (outline/axis swap and axis flip support)
         if (strncmp(line, "GRAPH,", 6) == 0) {
-            char type[8] = {0};
+            char type[16] = {0};
             char *cmd_start = strstr(line, "//");
             if (!cmd_start) continue;
 
@@ -475,7 +475,8 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
             tok = strtok(fields, ",");
             if (!tok) continue;
             const char *ptok = tok;
-            sscanf(ptok, "%7[^,]", type);
+            strncpy(type, tok, sizeof(type) - 1);
+            type[sizeof(type) - 1] = '\0'; // Ensure null termination
 
             tok = strtok(NULL, ",");
             if (!tok) continue;
@@ -517,42 +518,106 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                 if (flip_x) x0 = x + w - 1;
                 if (flip_y) y0 = y + h - 1;
 
-                if (strcasecmp(type, "BAR") == 0) {
-                    int fill_w = (w * percent) / 100;
-                    // Draw outline sides if !x, top/bottom if !y
-                    if (outline_x) {
-                        for (int dy = 0; dy < h; ++dy) {
-                            g15r_setPixel(canvas, x, y + dy, 1);
-                            g15r_setPixel(canvas, x + w - 1, y + dy, 1);
+                // Draw outline sides if !x, top/bottom if !y
+                if (outline_x) {
+                    for (int dy = 0; dy < h; ++dy) {
+                        g15r_setPixel(canvas, x, y + dy, 1);
+                        g15r_setPixel(canvas, x + w - 1, y + dy, 1);
+                    }
+                }
+                if (outline_y) {
+                    for (int dx = 0; dx < w; ++dx) {
+                        g15r_setPixel(canvas, x + dx, y, 1);
+                        g15r_setPixel(canvas, x + dx, y + h - 1, 1);
+                    }
+                }
+
+                if (strcasecmp(type, "BATCHBAR") == 0 || strcasecmp(type, "VBATCHBAR") == 0) {
+                    int is_vert = (strcasecmp(type, "VBATCHBAR") == 0);
+                    int values[64], count = 0;
+                    
+                    // DEBUG: See the exact raw output from soundshot
+                    // fprintf(stderr, "[DEBUG] Raw Output: %s\n", output);
+
+                    char *p_out = output;
+                    while (p_out && *p_out && count < 64) {
+                        // 1. Skip anything that isn't part of a number (like | or spaces)
+                        while (*p_out && !isdigit(*p_out) && *p_out != '-') {
+                            p_out++;
+                        }
+                        
+                        if (*p_out == '\0') break;
+
+                        // 2. Convert current position to integer
+                        values[count++] = atoi(p_out);
+
+                        // 3. Move pointer past the number we just read so we don't read it twice
+                        if (*p_out == '-') p_out++; 
+                        while (isdigit(*p_out)) {
+                            p_out++;
                         }
                     }
-                    if (outline_y) {
-                        for (int dx = 0; dx < w; ++dx) {
-                            g15r_setPixel(canvas, x + dx, y, 1);
-                            g15r_setPixel(canvas, x + dx, y + h - 1, 1);
+
+                    // DEBUG: Verify coordinates and count
+                    // fprintf(stderr, "[DEBUG] Graph: %d,%d %dx%d | Bins: %d\n", x, y, w, h, count);
+
+                    if (count > 0 && w > 0 && h > 0) {
+                        float bar_area = (float)(is_vert ? h : w);
+                        int bar_max_len = is_vert ? w : h;
+                        float step = bar_area / (float)count;
+
+                        for (int i = 0; i < count; i++) {
+                            int val = values[i];
+                            if (val < 0) val = 0; if (val > 100) val = 100;
+                            
+                            int bar_len = (bar_max_len * val) / 100;
+                            // Visual safety: if there's any value, show at least 1 pixel
+                            if (val > 0 && bar_len == 0) bar_len = 1;
+
+                            int start_p = (int)(i * step);
+                            int end_p = (int)((i + 1) * step) - 1;
+                            if (end_p < start_p) end_p = start_p;
+
+                            for (int p = start_p; p <= end_p; p++) {
+                                for (int l = 0; l < bar_len; l++) {
+                                    int dx, dy;
+                                    if (is_vert) {
+                                        // VBAR: l is width, p is vertical position
+                                        dx = flip_x ? (w - 1 - l) : l;
+                                        dy = flip_y ? p : (h - 1 - p);
+                                    } else {
+                                        // BAR: p is horizontal position, l is height
+                                        dx = flip_x ? (w - 1 - p) : p;
+                                        dy = flip_y ? l : (h - 1 - l);
+                                    }
+                                    g15r_setPixel(canvas, x + dx, y + dy, 1);
+                                }
+                            }
                         }
                     }
-                    // Fill only inside the outline (never on border pixels)
-                    int fill_x0 = x + (outline_x ? 1 : 0);
-                    int fill_x1 = x + fill_w - 1;
-                    int fill_y0 = y + (outline_y ? 1 : 0);
-                    int fill_y1 = y + h - 1 - (outline_y ? 1 : 0);
+                    rendered++;
+                    continue; 
+                }
+                // --- Standard BAR Logic (with Vertical VBAR support) ---
+                else if (strcasecmp(type, "BAR") == 0 || strcasecmp(type, "VBAR") == 0) {
+                    int percent = atoi(output);
+                    if (percent < 0) percent = 0; if (percent > 100) percent = 100;
+                    int is_vert = (strcasecmp(type, "VBAR") == 0);
+                    
+                    int fill_limit = (is_vert ? h : w) * percent / 100;
 
-                    // Flip X
-                    if (flip_x) {
-                        fill_x0 = x + w - fill_w;
-                        fill_x1 = x + w - 1 - (outline_x ? 1 : 0);
-                    }
-                    // Flip Y (for vertical bars, not standard, but for completeness)
-                    if (flip_y) {
-                        fill_y0 = y + h - 1 - (outline_y ? 1 : 0);
-                        fill_y1 = y + h - fill_w;
-                    }
-
-                    if (fill_x1 >= fill_x0 && fill_y1 >= fill_y0) {
-                        for (int dy = fill_y0; dy <= fill_y1; ++dy)
-                            for (int dx = fill_x0; dx <= fill_x1 && dx < x + w - (outline_x ? 1 : 0); ++dx)
-                                g15r_setPixel(canvas, dx, dy, 1);
+                    for (int i = 0; i < fill_limit; i++) {
+                        for (int j = 0; j < (is_vert ? w : h); j++) {
+                            int dx, dy;
+                            if (is_vert) {
+                                dx = j;
+                                dy = flip_y ? i : (h - 1 - i);
+                            } else {
+                                dx = flip_x ? (w - 1 - i) : i;
+                                dy = j;
+                            }
+                            g15r_setPixel(canvas, x + dx, y + dy, 1);
+                        }
                     }
                 } else if (strcasecmp(type, "PIE") == 0) {
                     int cx = x, cy = y, r = w;

@@ -22,14 +22,6 @@
 
 #define G510S_VERSION "0.1.0"
 
-// Macros used in g510s-clock.c
-#define MAX_SCRIPT_LINES 32
-#define MAX_LINE_LEN 256
-#define MAX_CMD_OUTPUT 256
-#define MAX_SCRIPT_VARS 32
-#define MAX_VAR_NAME 32
-#define MAX_VAR_VALUE 256
-
 // Terminal display settings
 #define TERMINAL_FONT_SIZE 0
 #define TERMINAL_CHAR_WIDTH 3

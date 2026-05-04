@@ -1,0 +1,24 @@
+%cpuval // top -bn1 | grep "Cpu(s)" | awk '{print int($2 + $4)}' //
+%memval // free | awk '/Mem:/ {print int($3/$2*100)}' //
+%netval // cat /proc/net/dev | grep wlp7s0 | awk '{print int(($2+$10)/1048576)}' //
+%diskval // df / | tail -1 | awk '{print int($5)}' //
+
+# System Monitor with LINE graphs
+
+# CPU Line Graph (auto-scale)
+5,5,L,0,0,// printf "CPU: @cpuval%" //
+GRAPH,LINE,!5,!15,70,18,100,// printf @cpuval //
+
+# Memory Line Graph (auto-scale)
+85,5,L,0,0,// printf "MEM: @memval%" //
+GRAPH,LINE,!85,!15,70,18,100,// printf @memval //
+
+# Divider
+RECT,80,5,1,35
+
+# Disk usage bar
+5,35,L,0,0,// printf "Disk: @diskval%" //
+
+# Net traffic
+85,35,L,0,0,// printf "Net: @netval MB TOTAL" //
+

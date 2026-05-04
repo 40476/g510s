@@ -1,0 +1,9 @@
+%vizu // soundshot alsa_output.pci-0000_02_00.0.analog-surround-51.monitor //
+
+# Audio Visualizer with VBATCHBAR
+
+# Title
+80,2,C,0,0,// printf "Audio VU" //
+
+# Vertical Batch Bar (audio visualizer)
+GRAPH,VBATCHBAR,!5,!8,150,33// printf "@vizu" //

@@ -1,0 +1,33 @@
+%cpuval   // top -bn1 | grep "Cpu(s)" | awk '{print int($2 + $4)}' //
+%ramval   // free | awk '/Mem:/ {print int($3/$2*100)}' //
+%gpuval   // amdgpu_top -d --json | jq ".[0].gpu_activity.GFX.value" //
+%pingtime // netping 1.1.1.1 -r 3000 -p 0 -q //
+%vizu     // soundshot alsa_output.pci-0000_02_00.0.analog-surround-51.monitor //
+
+# CPU meter
+5,5,L,0,0,// printf CPU //
+GRAPH,BAR,!18,!5,28,6,100,// printf @cpuval //
+53,5,C,0,0,^// printf "@cpuval%%" //
+
+# RAM usage
+5,13,L,0,0,// printf RAM //
+GRAPH,BAR,!18,!13,28,6,100,// printf @ramval //
+53,13,C,0,0,^// printf "@ramval%%" //
+
+# GPU usage
+5,21,L,0,0,// printf GPU //
+GRAPH,BAR,!18,!21,28,6,100,// printf @gpuval //
+53,21,C,0,0,^// printf "@gpuval%%" //
+
+# ping time
+35,29,L,0,0,^// printf "@pingtime ms" //
+GRAPH,LINE,!5,!29,27,12,0// printf @pingtime //
+
+# Divider
+RECT,62,0,1,43
+
+# Audio visualizer
+GRAPH,BATCHBAR,!66,!0,90,30// printf "@vizu"  //
+
+# Tailscale status
+66,33,L,0,1// tailscale status --json | jq -r 'if .Self.Online == true and .TailscaleIPs[0] != null then "ts: \(.TailscaleIPs[0])" else "ts: offline" end' //

@@ -1,0 +1,24 @@
+%timeval // date "+%H:%M" //
+%dateval // date "+%a %b %d" //
+%cpuval // top -bn1 | grep "Cpu(s)" | awk '{print int($2 + $4)}' //
+%cputemp // sensors | grep "Package id 0" | awk '{print int($4)}' //
+%memval // free | awk '/Mem:/ {print int($3/$2*100)}' //
+
+# Clock & System Status Dashboard
+
+# Big clock (top center)
+80,3,C,0,2,// printf "@timeval" //
+80,15,C,0,0,// printf "@dateval" //
+
+# Divider
+RECT,0,25,160,1
+
+# CPU section with temp
+5,29,L,0,0,// printf "CPU:@cpuval%%" //
+GRAPH,BAR,!35,!29,40,4,100,// printf @cpuval //
+# frick this stupid degree symbol
+77,29,L,0,0,// printf "@cputemp \u00B0C" //
+
+# Memory section
+5,35,L,0,0,// printf "RAM:@memval%%" //
+GRAPH,BAR,!35,!35,40,4,100,// printf @memval //

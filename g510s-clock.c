@@ -1357,12 +1357,12 @@ void digital_clock(lcd_t *lcd) {
         // 4. THE DELAY LOGIC
         if (render_delay_ms > 0) {
             usleep(render_delay_ms * 1000);
-            printf("Current delay: %d ms\n", render_delay_ms);
+            // printf("Current delay: %d ms\n", render_delay_ms);
         } else {
             // We are running FASTER than 1FPS (render_delay_ms is 0)
             // Use a tiny 1ms sleep to prevent 100% CPU usage
             usleep(50000); 
-            printf("Current delay: %d ms\n", render_delay_ms);
+            // printf("Current delay: %d ms\n", render_delay_ms);
         }
 
         // Only update ident when the actual wall-clock second changes

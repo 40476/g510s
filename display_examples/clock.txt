@@ -1,0 +1,6 @@
+# Big clock display
+80,15,C,0,2,// printf date "+%H:%M:%S" //
+80,30,C,0,0,// printf date "+%a %b %d" //
+
+# Simple separator
+RECT,10,26,140,1

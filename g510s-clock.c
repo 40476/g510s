@@ -100,6 +100,33 @@ typedef struct {
 static graph_buffer_t g_buffers[MAX_SCRIPT_LINES];
 static int total_buffers = 0;
 
+// Rendering control settings (configured via !set commands in display.txt)
+static int render_delay_ms = 0;           // Delay between renders
+static int display_invert = 0;            // Invert display (0=normal, 1=inverted)
+static int display_brightness = 100;      // Brightness (0-100, simulated via dithering)
+static int display_dither = 0;            // Dithering effect (0=off, 1=on)
+static int display_rotate = 0;            // Rotation (0, 90, 180, 270)
+static int pixel_scale = 1;               // Pixel scaling factor (1-4)
+static int cache_enabled = 0;             // Enable command output caching
+static int cache_runs_threshold = 5;      // Cache if command runs more than this many times
+static int cache_time_threshold = 10;     // ...within this many seconds
+static int color_mode = 0;                // Color mode (0=normal, 1=stipple, 2=checkerboard)
+static int scanline_effect = 0;          // Scanline effect (0=off, 1=on)
+static int pixel_ghost = 0;              // Pixel ghosting effect (0-10)
+
+// Command cache structure
+typedef struct {
+    unsigned int id;          // Hash of the command
+    char output[MAX_CMD_OUTPUT];
+    int run_count;
+    time_t first_run_time;
+    time_t last_run_time;
+} cmd_cache_t;
+
+#define MAX_CACHE_ENTRIES 32
+static cmd_cache_t cmd_cache[MAX_CACHE_ENTRIES];
+static int cmd_cache_count = 0;
+
 
 static void trim(char *str) {
     char *end;
@@ -108,7 +135,38 @@ static void trim(char *str) {
     while(end > str && (*end == ' ' || *end == '\t' || *end == '\n')) *end-- = 0;
 }
 
+long long get_now_ms() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000 + (ts.tv_nsec / 1000000);
+}
+
 static void exec_cmd(const char *cmd, char *output, size_t outlen) {
+    // Check cache first if enabled
+    if (cache_enabled) {
+        unsigned int id = hash_cmd(cmd);
+        time_t now = time(NULL);
+        for (int i = 0; i < cmd_cache_count; i++) {
+            if (cmd_cache[i].id == id) {
+                cmd_cache[i].run_count++;
+                if (cmd_cache[i].run_count >= cache_runs_threshold &&
+                    now - cmd_cache[i].first_run_time <= cache_time_threshold) {
+                    // Cache hit: return cached output
+                    strncpy(output, cmd_cache[i].output, outlen);
+                    output[outlen-1] = 0;
+                    return;
+                }
+                // If cache expired, reset timer
+                if (now - cmd_cache[i].first_run_time > cache_time_threshold) {
+                    cmd_cache[i].first_run_time = now;
+                    cmd_cache[i].run_count = 1;
+                }
+                break; // Re-execute command
+            }
+        }
+    }
+
+    // Execute command
     FILE *fp = popen(cmd, "r");
     if (!fp) {
         strncpy(output, "[err]", outlen);
@@ -118,9 +176,34 @@ static void exec_cmd(const char *cmd, char *output, size_t outlen) {
     if (fgets(output, outlen, fp) == NULL) {
         strncpy(output, "[none]", outlen);
         output[outlen-1] = 0;
+    } else {
+        trim(output);
     }
     pclose(fp);
-    trim(output);
+
+    // Store in cache if enabled
+    if (cache_enabled) {
+        unsigned int id = hash_cmd(cmd);
+        int slot = -1;
+        for (int i = 0; i < cmd_cache_count; i++) {
+            if (cmd_cache[i].id == id) {
+                slot = i;
+                break;
+            }
+        }
+        if (slot == -1 && cmd_cache_count < MAX_CACHE_ENTRIES) {
+            slot = cmd_cache_count++;
+            cmd_cache[slot].id = id;
+            cmd_cache[slot].run_count = 0;
+            cmd_cache[slot].first_run_time = time(NULL);
+        }
+        if (slot != -1) {
+            strncpy(cmd_cache[slot].output, output, MAX_CMD_OUTPUT);
+            cmd_cache[slot].output[MAX_CMD_OUTPUT-1] = 0;
+            cmd_cache[slot].last_run_time = time(NULL);
+            cmd_cache[slot].run_count++;
+        }
+    }
 }
 
 static int parse_int_flag(const char **str, int *flag) {
@@ -176,7 +259,7 @@ static void substitute_vars(char *line, script_var_t *vars, int var_count) {
 static int render_scripted_display(g15canvas *canvas, const char *filepath) {
     FILE *f = fopen(filepath, "r");
     if (!f) return 0;
-
+    
     char line[MAX_LINE_LEN];
     char raw_line_copy[MAX_LINE_LEN]; // Store original line for hashing
     int rendered = 0;
@@ -189,10 +272,11 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
         trim(line);
         if (line[0] == 0 || line[0] == '#') continue;
 
+
         // --- 1. Save the RAW line before substitution for stable Hashing ---
         strncpy(raw_line_copy, line, MAX_LINE_LEN - 1);
         raw_line_copy[MAX_LINE_LEN - 1] = 0;
-
+        
         // --- Variable definition ---
         if (line[0] == '%') {
             char *p = line + 1;
@@ -226,7 +310,47 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
         // --- Variable substitution ---
         substitute_vars(line, vars, var_count);
 
-        if (line[0] == 0 || line[0] == '#') continue;
+        // --- Handle !set commands for rendering control ---
+        if (strncmp(line, "!set ", 5) == 0) {
+            char key[64] = {0};
+            char val_str[64] = {0};
+
+            // sscanf safely splits "!set key value" into two strings regardless of space/tab count
+            if (sscanf(line + 5, "%63s %63s", key, val_str) == 2) {
+                int value = atoi(val_str);
+                if (strcmp(key, "delay") == 0) {
+                    render_delay_ms = value;
+                } else if (strcmp(key, "invert") == 0) {
+                    display_invert = value ? 1 : 0;
+                } else if (strcmp(key, "brightness") == 0) {
+                    display_brightness = (value < 0) ? 0 : (value > 100 ? 100 : value);
+                } else if (strcmp(key, "dither") == 0) {
+                    display_dither = value ? 1 : 0;
+                } else if (strcmp(key, "rotate") == 0) {
+                    display_rotate = value;
+                } else if (strcmp(key, "pixel_scale") == 0) {
+                    pixel_scale = value;
+                } else if (strcmp(key, "cache") == 0) {
+                    cache_enabled = value ? 1 : 0;
+                } else if (strcmp(key, "cache_runs") == 0) {
+                    cache_runs_threshold = value;
+                } else if (strcmp(key, "cache_time") == 0) {
+                    cache_time_threshold = value;
+                } else if (strcmp(key, "color_mode") == 0) {
+                    color_mode = value;
+                } else if (strcmp(key, "scanline") == 0) {
+                    scanline_effect = value ? 1 : 0;
+                } else if (strcmp(key, "ghost") == 0) {
+                    pixel_ghost = value;
+                }
+                
+                // Keep your debug print to verify it's working
+                // printf("SET: %s = %d\n", key, value);
+            }
+            continue;
+        }
+
+        
 
         // Rectangle: RECT,x,y,w,h[,fillmode] (filled or outline, fill controlled by fillmode)
         int fill_shape = 0, black_fill = 0, fill_mode = 0, outline_black = 0;
@@ -568,7 +692,8 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
 
                         for (int i = 0; i < count; i++) {
                             int val = values[i];
-                            if (val < 0) val = 0; if (val > 100) val = 100;
+                            if (val < 0) val = 0;
+                            if (val > 100) val = 100;
                             
                             int bar_len = (bar_max_len * val) / 100;
                             // Visual safety: if there's any value, show at least 1 pixel
@@ -816,6 +941,82 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
     }
     fclose(f);
     return rendered;
+}
+
+static void apply_display_settings(g15canvas *canvas) {
+    // Invert display
+    if (display_invert) {
+        for (int i = 0; i < G15_BUFFER_LEN; i++) {
+            canvas->buffer[i] = ~canvas->buffer[i];
+        }
+    }
+
+    // Brightness simulation (dithering based on brightness level)
+    if (display_brightness < 100) {
+        int threshold = (display_brightness * 255) / 100;
+        for (int y = 0; y < DISPLAY_HEIGHT; y++) {
+            for (int x = 0; x < DISPLAY_WIDTH; x++) {
+                int byte_idx = (y * DISPLAY_WIDTH + x) / 8;
+                int bit_idx = (y * DISPLAY_WIDTH + x) % 8;
+                int pixel = canvas->buffer[byte_idx] & (1 << bit_idx);
+                if (pixel) {
+                    // Use a deterministic dither pattern: checkerboard based on coordinates
+                    int pattern = ((x + y) % 2) * 255;
+                    if (pattern > threshold) {
+                        canvas->buffer[byte_idx] &= ~(1 << bit_idx);
+                    }
+                }
+            }
+        }
+    }
+
+    // Scanline effect
+    if (scanline_effect) {
+        for (int y = 0; y < DISPLAY_HEIGHT; y += 2) {
+            for (int x = 0; x < DISPLAY_WIDTH; x++) {
+                canvas->buffer[(y * DISPLAY_WIDTH + x) / 8] &= ~(1 << ((y * DISPLAY_WIDTH + x) % 8));
+            }
+        }
+    }
+
+    // Dither effect (overall pattern)
+    if (display_dither) {
+        for (int y = 0; y < DISPLAY_HEIGHT; y++) {
+            for (int x = 0; x < DISPLAY_WIDTH; x++) {
+                if ((x + y) % 2 == 0) {
+                    int pixel = canvas->buffer[(y * DISPLAY_WIDTH + x) / 8] & (1 << ((y * DISPLAY_WIDTH + x) % 8));
+                    if (pixel) {
+                        canvas->buffer[(y * DISPLAY_WIDTH + x) / 8] &= ~(1 << ((y * DISPLAY_WIDTH + x) % 8));
+                    }
+                }
+            }
+        }
+    }
+
+    // Color mode
+    if (color_mode == 1) { // stipple
+        for (int y = 0; y < DISPLAY_HEIGHT; y++) {
+            for (int x = 0; x < DISPLAY_WIDTH; x++) {
+                if ((x % 3 == 0) && (y % 3 == 0)) {
+                    g15r_setPixel(canvas, x, y, 1);
+                }
+            }
+        }
+    } else if (color_mode == 2) { // checkerboard
+        for (int y = 0; y < DISPLAY_HEIGHT; y++) {
+            for (int x = 0; x < DISPLAY_WIDTH; x++) {
+                if ((x + y) % 2 == 0) {
+                    g15r_setPixel(canvas, x, y, 1);
+                } else {
+                    g15r_setPixel(canvas, x, y, 0);
+                }
+            }
+        }
+    }
+
+    // Rotation placeholder (not implemented due to buffer size)
+    // pixel_scale not implemented
+    // pixel_ghost not implemented
 }
 
 // Terminal emulator functions
@@ -1078,35 +1279,41 @@ void terminal_send_input(const char *input, size_t len) {
 }
 
 void digital_clock(lcd_t *lcd) {
-    time_t currtime = time(NULL);
-
-    // Redraw every 1 second
-    if (lcd->ident != currtime) {
-        g15canvas *canvas = (g15canvas *)malloc(sizeof(g15canvas));
-        if (canvas == NULL) {
-            printf("G510s: failed to create display canvas\n");
-            return;
+    long long now = get_now_ms();
+    time_t seconds = (time_t)(now / 1000);
+    // 1. CACHE THE SCRIPT PATH (Only run whoami ONCE)
+    static char script_path[256] = "";
+    if (script_path[0] == '\0') {
+        char user[64] = {0};
+        FILE *fp = popen("whoami", "r");
+        if (fp && fgets(user, sizeof(user), fp)) {
+            size_t len = strlen(user);
+            if (len > 0 && (user[len - 1] == '\n' || user[len - 1] == '\r')) user[len - 1] = '\0';
+            snprintf(script_path, sizeof(script_path), "/home/%s/.config/g510s/display.txt", user);
         }
+        if (fp) pclose(fp);
+        
+        // Fallback if whoami failed
+        if (script_path[0] == '\0') strcpy(script_path, "display.txt");
+    }
+
+    // 2. TRIGGER LOGIC
+    // We run if the second changed OR if a delay is set (meaning we want high FPS)
+    if (now - lcd->ident >= 1000 || render_delay_ms > 0) {
+        
+        // 3. USE STATIC CANVAS (No more malloc/free every frame)
+        static g15canvas canvas_obj;
+        g15canvas *canvas = &canvas_obj;
 
         memset(canvas->buffer, 0, G15_BUFFER_LEN);
         canvas->mode_cache = 0;
         canvas->mode_reverse = 0;
         canvas->mode_xor = 0;
 
-        // Terminal mode: run command and display output
         if (terminal_mode) {
             render_terminal(canvas);
         } else {
-            // Try to render from script file
-            char user[64] = {0};
-            FILE *fp = popen("whoami", "r");
-            if (fp && fgets(user, sizeof(user), fp)) {
-                size_t len = strlen(user);
-                if (len > 0 && (user[len - 1] == '\n' || user[len - 1] == '\r')) user[len - 1] = '\0';
-            }
-            if (fp) pclose(fp);
-            char script_path[256];
-            snprintf(script_path, sizeof(script_path), "/home/%s/.config/g510s/display.txt", user);
+            // This is now lightning fast because script_path is pre-calculated
             int rendered = render_scripted_display(canvas, script_path);
 
             if (!rendered) {
@@ -1119,34 +1326,46 @@ void digital_clock(lcd_t *lcd) {
                 if (!g510s_data.clock_mode) {
                     char ampm_buf[3];
                     memset(ampm_buf, 0, 3);
-                    strftime(hour_buf, 3, "%l", localtime(&currtime));
-                    strftime(ampm_buf, 3, "%p", localtime(&currtime));
+                    strftime(hour_buf, 3, "%l", localtime(&seconds));
+                    strftime(ampm_buf, 3, "%p", localtime(&seconds));
                     g15r_renderString(canvas, (unsigned char *)ampm_buf, 0, G15_TEXT_LARGE, 135, 26);
                 } else { // 24 hour format
-                    strftime(hour_buf, 3, "%H", localtime(&currtime));
+                    strftime(hour_buf, 3, "%H", localtime(&seconds));
                 }
                 g15r_renderString(canvas, (unsigned char *)hour_buf, 0, 39, 30, 2);
                 //g15r_G15FPrint(canvas, ":", 77, -3, 39, 0, 1, 0);
 
                 // minute
-                strftime(min_buf, 3, "%M", localtime(&currtime));
+                strftime(min_buf, 3, "%M", localtime(&seconds));
                 g15r_renderString(canvas, (unsigned char *)min_buf, 0, 39, 86, 2);
 
                 // date string
                 if (g510s_data.show_date) {
                     char date_buf[40];
                     memset(date_buf, 0, 40);
-                    strftime(date_buf, 40, "%A %B %e %Y", localtime(&currtime));
+                    strftime(date_buf, 40, "%A %B %e %Y", localtime(&seconds));
                     g15r_renderString(canvas, (unsigned char *)date_buf, 0, G15_TEXT_MED, 80 - ((strlen(date_buf) * 5) / 2), 35);
                 }
             }
         }
 
-        memset(lcd->buf, 0, G15_BUFFER_LEN);
+        apply_display_settings(canvas);
+        
+        // Copy to LCD buffer
         memcpy(lcd->buf, canvas->buffer, G15_BUFFER_LEN);
-        lcd->ident = currtime;
 
-        free(canvas);
+        // 4. THE DELAY LOGIC
+        if (render_delay_ms > 0) {
+            usleep(render_delay_ms * 1000);
+            printf("Current delay: %d ms\n", render_delay_ms);
+        } else {
+            // We are running FASTER than 1FPS (render_delay_ms is 0)
+            // Use a tiny 1ms sleep to prevent 100% CPU usage
+            usleep(50000); 
+            printf("Current delay: %d ms\n", render_delay_ms);
+        }
+
+        // Only update ident when the actual wall-clock second changes
+        lcd->ident = now;
     }
-    return;
 }

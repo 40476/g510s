@@ -27,6 +27,11 @@ Graphical utility for Logitech G510 and G510s keyboards on Linux.
 * DBUS profile and color control
 * Advanced custom LCD configurations
 * libg15daemon-client compatibility
+* Terminal emulator mode (display terminal output on LCD)
+* Display effects: invert, brightness simulation, dither, scanline, color modes
+* Command output caching for improved performance
+* New graph types: BATCHBAR, VBATCHBAR, VBAR (vertical bars)
+* !set commands for runtime display configuration
 
 ## SystemD file
 
@@ -62,35 +67,98 @@ WantedBy=default.target
 
 ---
 
-## Complex Example by copilot cuz lazy
+## Runtime Display Configuration (!set commands)
 
-```plaintext
-# Variables
-%cpuval // top -bn1 | grep "Cpu(s)" | awk '{print int($2 + $4)}' //
-%ramval // free | awk '/Mem:/ {print int($3/$2*100)}' //
-%gpuval // amdgpu_top -d --json | jq ".[0].gpu_activity.GFX.value" //
+You can configure display rendering behavior at runtime by adding `!set` commands in your `display.txt` script. These must appear on their own line:
 
-# CPU usage graph
-GRAPH,LINE,0,4,160,35,100,// printf @cpuval //
-
-# CPU meter
-5,13,L,0,0,// printf CPU //
-GRAPH,BAR,!5,!5,50,6,100,// printf @cpuval //
-55,13,R,0,0,^// echo -n "@cpuval%" //
-
-# RAM usage
-60,13,L,0,0,// printf RAM //
-GRAPH,BAR,!60,!5,50,6,100,// printf @ramval //
-110,13,R,0,0,^// echo -n "@ramval%" //
-
-# GPU usage
-115,13,L,0,0,// printf GPU //
-GRAPH,BAR,!115,!5,40,6,100,// printf @gpuval //
-155,13,R,0,0,^// echo -n "@gpuval%" //
-
-# Date and time
-78,30,C,0,1,// date "+%H:%M:%S %a %b %d" //
+```g510s
+!set <parameter> <value>
 ```
+
+### Available Parameters
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `delay` | milliseconds | Add delay between renders (for high-FPS updates) |
+| `invert` | 0 or 1 | Invert display (1=inverted, 0=normal) |
+| `brightness` | 0-100 | Simulate brightness (100=full, 0=off) |
+| `dither` | 0 or 1 | Enable dithering effect |
+| `cache` | 0 or 1 | Enable command output caching |
+| `cache_runs` | number | Cache if command runs more than this many times |
+| `cache_time` | seconds | ...within this time window |
+| `color_mode` | 0, 1, or 2 | 0=normal, 1=stipple, 2=checkerboard |
+| `scanline` | 0 or 1 | Enable scanline effect |
+
+**Example:**
+
+```g510s
+!set delay 50
+!set invert 0
+!set brightness 80
+!set cache 1
+!set cache_runs 5
+!set cache_time 10
+```
+
+---
+
+## New Graph Types
+
+### BATCHBAR and VBATCHBAR
+
+Display multiple bar values from a single command output (e.g., audio levels):
+
+* `BATCHBAR` - Horizontal batch bars
+* `VBATCHBAR` - Vertical batch bars
+
+The command should output pipe-separated integer values. Each value becomes a bar segment.
+
+Audio levels (assuming output like "`100|56|59|63|8|7|29|35|41|30|18|21|9|2|1|0`")
+
+**Example:**
+
+```g510s
+GRAPH,BATCHBAR,0,0,160,43,// amixer get Master | grep -o '[0-9]*%' | sed 's/%//g' //
+```
+
+### VBAR (Vertical Bar)
+
+A vertical bar graph that grows upward instead of horizontally:
+
+**Example:**
+
+```g510s
+# Vertical CPU meter
+GRAPH,VBAR,150,0,10,43,// top -bn1 | grep "Cpu(s)" | awk '{print int($2+$4)}' //
+```
+
+---
+
+## Terminal Mode
+
+The G510s can display a terminal emulator on the LCD screen. This feature:
+
+*It is however, currently not finished and help is appreciated*
+
+* Runs a shell in a PTY (pseudo-terminal)
+* Filters ANSI escape sequences for clean display
+* Shows the last 8 lines (53 columns wide using 3px font)
+* Automatically scrolls with output
+
+**Terminal features:**
+
+* Supports basic shell commands
+* Filters ANSI escape codes (colors, cursor movement, etc.)
+* Tab completion (tabs converted to 4 spaces)
+* Non-blocking I/O
+
+**Configure terminal command:** Set `terminal_cmd` in configuration to run a specific command instead of the default shell.
+
+---
+
+## Display examples:
+
+See the `display_examples` directory for the files I put together
 
 ## Fill Modes for Shapes
 
@@ -103,7 +171,7 @@ For `RECT`, `ELLIPSE`, and `POLY`, the last argument (optional) controls the fil
 
 **Examples:**
 
-```plaintext
+```g510s
 # Rectangle examples
 RECT,5,5,30,10           # Outline rectangle at (5,5), size 30x10
 RECT,40,5,30,10,1        # Filled rectangle (white)
@@ -150,7 +218,7 @@ POLY,[(120,45);(140,60);(100,60)],3      # Filled and outline black (POLY only)
 
 ## sus \/
 
-```plaintext
+```g51-s
 RECT,40,15,10,15,0
 ELLIPSE,53,30,4,6,0
 ELLIPSE,60,30,4,6,0

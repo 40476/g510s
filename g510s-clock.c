@@ -22,7 +22,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
+#include <linux/time.h>
 #include <pthread.h>
 #include <libg15.h>
 #include <libg15render.h>
@@ -39,6 +39,7 @@
 #include <errno.h>
 
 #include "g510s.h"
+
 
 // Define terminal variables (declared as extern in g510s.h)
 extern int terminal_mode;
@@ -105,14 +106,11 @@ static int render_delay_ms = 0;           // Delay between renders
 static int display_invert = 0;            // Invert display (0=normal, 1=inverted)
 static int display_brightness = 100;      // Brightness (0-100, simulated via dithering)
 static int display_dither = 0;            // Dithering effect (0=off, 1=on)
-static int display_rotate = 0;            // Rotation (0, 90, 180, 270)
-static int pixel_scale = 1;               // Pixel scaling factor (1-4)
 static int cache_enabled = 0;             // Enable command output caching
 static int cache_runs_threshold = 5;      // Cache if command runs more than this many times
 static int cache_time_threshold = 10;     // ...within this many seconds
 static int color_mode = 0;                // Color mode (0=normal, 1=stipple, 2=checkerboard)
 static int scanline_effect = 0;          // Scanline effect (0=off, 1=on)
-static int pixel_ghost = 0;              // Pixel ghosting effect (0-10)
 
 // Command cache structure
 typedef struct {
@@ -326,10 +324,6 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                     display_brightness = (value < 0) ? 0 : (value > 100 ? 100 : value);
                 } else if (strcmp(key, "dither") == 0) {
                     display_dither = value ? 1 : 0;
-                } else if (strcmp(key, "rotate") == 0) {
-                    display_rotate = value;
-                } else if (strcmp(key, "pixel_scale") == 0) {
-                    pixel_scale = value;
                 } else if (strcmp(key, "cache") == 0) {
                     cache_enabled = value ? 1 : 0;
                 } else if (strcmp(key, "cache_runs") == 0) {
@@ -340,11 +334,8 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                     color_mode = value;
                 } else if (strcmp(key, "scanline") == 0) {
                     scanline_effect = value ? 1 : 0;
-                } else if (strcmp(key, "ghost") == 0) {
-                    pixel_ghost = value;
                 }
                 
-                // Keep your debug print to verify it's working
                 // printf("SET: %s = %d\n", key, value);
             }
             continue;
@@ -1014,9 +1005,6 @@ static void apply_display_settings(g15canvas *canvas) {
         }
     }
 
-    // Rotation placeholder (not implemented due to buffer size)
-    // pixel_scale not implemented
-    // pixel_ghost not implemented
 }
 
 // Terminal emulator functions

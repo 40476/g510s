@@ -329,18 +329,17 @@ void process_keys(lcdlist_t *displaylist, unsigned int key, unsigned int key_sta
         if (terminal_mode) {
           terminal_mode = 0;
           close_terminal();
-          printf("G510s: Terminal closed (long press L1)\n");
+          // printf("G510s: Terminal closed (long press L1)\n");
         } else {
           terminal_mode = 1;
           init_terminal();
-          printf("G510s: Terminal opened (long press L1)\n");
+          // printf("G510s: Terminal opened (long press L1)\n");
         }
         displaylist->current->lcd->ident = 0; // Force redraw
       } else {
         // Short press - toggle terminal keyboard mode
         terminal_keyboard_mode = !terminal_keyboard_mode;
-        printf("G510s: Terminal keyboard mode %s\n", 
-               terminal_keyboard_mode ? "ON" : "OFF");
+        // printf("G510s: Terminal keyboard mode %s\n", terminal_keyboard_mode ? "ON" : "OFF");
       }
       l1_pressed = 0;
     }

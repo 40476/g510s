@@ -43,6 +43,8 @@
 // Preview buffer - declared in g510s.c
 extern unsigned char preview_buffer[G15_BUFFER_LEN];
 extern int terminal_mode;
+extern int dump_display_buffer;
+static int display_buffer_dumped = 0;  // Only dump once
 extern char terminal_cmd[1024];
 
 int terminal_fd = -1;
@@ -1525,6 +1527,19 @@ void digital_clock(lcd_t *lcd) {
         memcpy(lcd->buf, canvas->buffer, G15_BUFFER_LEN);
         // Copy to preview buffer for GUI
         memcpy(preview_buffer, canvas->buffer, G15_BUFFER_LEN);
+        
+        // Dump first render to /tmp/g510s_display.bin if --dump-display-buffer was passed
+        if (dump_display_buffer && !display_buffer_dumped) {
+            FILE *dump_f = fopen("/tmp/g510s_display.bin", "wb");
+            if (dump_f) {
+                fwrite(preview_buffer, 1, G15_BUFFER_LEN, dump_f);
+                fclose(dump_f);
+                printf("G510s: Dumped first display buffer to /tmp/g510s_display.bin (%d bytes)\n", G15_BUFFER_LEN);
+            } else {
+                printf("G510s: Failed to dump display buffer\n");
+            }
+            display_buffer_dumped = 1;
+        }
 
         if (render_delay_ms > 0) {
             usleep(render_delay_ms * 1000);

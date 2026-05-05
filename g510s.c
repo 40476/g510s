@@ -43,6 +43,9 @@ char terminal_cmd[1024] = {0};
 // Display buffer for preview
 unsigned char preview_buffer[G15_BUFFER_LEN];
 
+// Dump display buffer flag
+int dump_display_buffer = 0;
+
 // Presets array
 static preset_t presets[MAX_PRESETS];
 static int preset_count = 0;
@@ -788,7 +791,7 @@ static gboolean on_preview_draw(GtkWidget *widget, cairo_t *cr, gpointer data) {
     int height = gtk_widget_get_allocated_height(widget);
     
     // The LCD uses 32-byte offset before pixel data, and pixels are 160*43/8 = 860 bytes
-    #define PREVIEW_LCD_OFFSET 32
+    #define PREVIEW_LCD_OFFSET 0
     int preview_pitch = DISPLAY_WIDTH / 8; // 20 bytes per row
     
     // Calculate scaling to fit the 160x43 display into the widget
@@ -815,8 +818,7 @@ static gboolean on_preview_draw(GtkWidget *widget, cairo_t *cr, gpointer data) {
         for (int x = 0; x < DISPLAY_WIDTH; x++) {
             int byte_idx = PREVIEW_LCD_OFFSET + y * preview_pitch + x / 8;
             int bit_idx = x % 8;
-            int pixel = preview_buffer[byte_idx] & (1 << bit_idx);
-            
+            int pixel = preview_buffer[byte_idx] & (0x80 >> bit_idx);            
             if (pixel) {
                 cairo_set_source_rgb(cr, 0.168, 0.878, 0.298);
             } else {
@@ -1092,6 +1094,8 @@ int main(int argc, char *argv[]) {
         opt_invalid = 1;
         break;
       }
+    } else if (!strcmp(argv[i],"--dump-display-buffer")) {
+      dump_display_buffer = 1;
     } else if (!strcmp(argv[i],"--terminal")) {
       terminal_mode = 1;
       if (argv[i+1]) {

@@ -24,10 +24,15 @@
 #include <pthread.h>
 #include <libg15.h>
 #include <libg15render.h>
-#include <gtk/gtk.h> // Use standard GTK include for type visibility
+#include <gtk/gtk.h>
 #include <libappindicator3-0.1/libappindicator/app-indicator.h>
-#include <glib-2.0/gio/gio.h> // Add for DBus support
-#include <glib.h>    // Add for guint definition
+#include <glib-2.0/gio/gio.h>
+#include <glib.h>
+#include <string.h>
+#include <stdio.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <math.h>
 
 #include "g510s.h"
 
@@ -35,18 +40,24 @@
 int terminal_mode = 0;
 char terminal_cmd[1024] = {0};
 
+// Display buffer for preview
+unsigned char preview_buffer[G15_BUFFER_LEN];
+
+// Presets array
+static preset_t presets[MAX_PRESETS];
+static int preset_count = 0;
+
 // DBus interface and object path
 #define G510S_DBUS_NAME "org.g510s.control"
 #define G510S_DBUS_PATH "/org/g510s/control"
 #define G510S_DBUS_INTERFACE "org.g510s.control"
 
-// DBus property names (add all settings)
+// DBus property names
 #define G510S_DBUS_PROP_MODE "Mode"
 #define G510S_DBUS_PROP_COLOR "Color"
 #define G510S_DBUS_PROP_COLORFADE "ColorFade"
 #define G510S_DBUS_PROP_AUTOSAVE "AutoSaveOnQuit"
 #define G510S_DBUS_PROP_GUIHIDDEN "GuiHidden"
-// Add more as needed for all settings
 
 // Forward declarations for DBus handlers
 static gboolean on_handle_set_mode(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
@@ -54,38 +65,50 @@ static gboolean on_handle_set_mode(GDBusConnection *connection, const gchar *sen
                                    GDBusMethodInvocation *invocation, gpointer user_data);
 
 static gboolean on_handle_set_color(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                    const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                    GDBusMethodInvocation *invocation, gpointer user_data);
+                                   const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                   GDBusMethodInvocation *invocation, gpointer user_data);
 
 static gboolean on_handle_set_colorfade(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                        const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                        GDBusMethodInvocation *invocation, gpointer user_data);
+                                       const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                       GDBusMethodInvocation *invocation, gpointer user_data);
 static gboolean on_handle_set_autosave(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                        const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                        GDBusMethodInvocation *invocation, gpointer user_data);
+                                       const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                       GDBusMethodInvocation *invocation, gpointer user_data);
 static gboolean on_handle_set_guihidden(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                        const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                        GDBusMethodInvocation *invocation, gpointer user_data);
+                                       const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                       GDBusMethodInvocation *invocation, gpointer user_data);
 
 static void emit_properties_changed(GDBusConnection *connection);
 static gboolean on_handle_save_config(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                      const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                      GDBusMethodInvocation *invocation, gpointer user_data);
+                                     const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                     GDBusMethodInvocation *invocation, gpointer user_data);
 
 // Forward declarations for macro DBus handlers
 static gboolean on_handle_get_macro(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                    const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                    GDBusMethodInvocation *invocation, gpointer user_data);
+                                   const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                   GDBusMethodInvocation *invocation, gpointer user_data);
 static gboolean on_handle_set_macro(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                    const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                    GDBusMethodInvocation *invocation, gpointer user_data);
+                                   const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                   GDBusMethodInvocation *invocation, gpointer user_data);
 static gboolean on_handle_run_macro(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                    const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                    GDBusMethodInvocation *invocation, gpointer user_data);
+                                   const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                   GDBusMethodInvocation *invocation, gpointer user_data);
+
+// Forward declarations for preset DBus handlers
+static gboolean on_handle_save_preset(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
+                                     const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                     GDBusMethodInvocation *invocation, gpointer user_data);
+static gboolean on_handle_load_preset(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
+                                     const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                     GDBusMethodInvocation *invocation, gpointer user_data);
+static gboolean on_handle_list_presets(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
+                                      const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                      GDBusMethodInvocation *invocation, gpointer user_data);
+
+// Forward declaration for display_notification (defined in g510s-clock.c)
+extern void display_notification(const char *text, int duration_ms, int priority);
 
 // --- GUI refresh support ---
-#include <string.h>
-
 static void refresh_gui_internal();
 static gboolean refresh_gui_idle(gpointer data) {
     refresh_gui_internal();
@@ -95,14 +118,177 @@ void refresh_gui() {
     g_idle_add(refresh_gui_idle, NULL);
 }
 
+// --- Preset management ---
+void load_presets() {
+    char home_path[255];
+    char presets_dir[] = "/.config/g510s/presets/";
+    char *path;
+    
+    preset_count = 0;
+    memset(presets, 0, sizeof(presets));
+    
+    strncpy(home_path, getenv("HOME"), sizeof(home_path));
+    if (home_path[0] == '\0') return;
+    
+    path = malloc(strlen(home_path) + strlen(presets_dir) + 1);
+    strcpy(path, home_path);
+    strcat(path, presets_dir);
+    
+    DIR *dir = opendir(path);
+    if (!dir) {
+        free(path);
+        return;
+    }
+    
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL && preset_count < MAX_PRESETS) {
+        if (entry->d_type == DT_REG || entry->d_type == DT_LNK) {
+            char *dot = strrchr(entry->d_name, '.');
+            if (dot && strcmp(dot, ".prs") == 0) {
+                char fullpath[512];
+                snprintf(fullpath, sizeof(fullpath), "%s%s", path, entry->d_name);
+                
+                FILE *f = fopen(fullpath, "r");
+                if (f) {
+                    char name_no_ext[64];
+                    strncpy(name_no_ext, entry->d_name, strlen(entry->d_name) - 4);
+                    name_no_ext[strlen(entry->d_name) - 4] = '\0';
+                    strncpy(presets[preset_count].name, name_no_ext, sizeof(presets[preset_count].name) - 1);
+                    
+                    fread(&presets[preset_count].m1, sizeof(struct m_data_s), 1, f);
+                    fread(&presets[preset_count].m2, sizeof(struct m_data_s), 1, f);
+                    fread(&presets[preset_count].m3, sizeof(struct m_data_s), 1, f);
+                    fread(&presets[preset_count].mr, sizeof(struct m_data_s), 1, f);
+                    fread(&presets[preset_count].clock_mode, sizeof(int), 1, f);
+                    fread(&presets[preset_count].show_date, sizeof(int), 1, f);
+                    fread(&presets[preset_count].color_fade, sizeof(int), 1, f);
+                    
+                    fclose(f);
+                    preset_count++;
+                }
+            }
+        }
+    }
+    closedir(dir);
+    free(path);
+}
+
+void save_preset(const char *name) {
+    char home_path[255];
+    char presets_dir[] = "/.config/g510s/presets/";
+    char *path;
+    char fullpath[512];
+    
+    strncpy(home_path, getenv("HOME"), sizeof(home_path));
+    if (home_path[0] == '\0') return;
+    
+    path = malloc(strlen(home_path) + strlen(presets_dir) + 1);
+    strcpy(path, home_path);
+    strcat(path, presets_dir);
+    
+    mkdir(path, 0777);
+    
+    snprintf(fullpath, sizeof(fullpath), "%s%s.prs", path, name);
+    
+    FILE *f = fopen(fullpath, "w");
+    if (f) {
+        fwrite(&g510s_data.m1, sizeof(struct m_data_s), 1, f);
+        fwrite(&g510s_data.m2, sizeof(struct m_data_s), 1, f);
+        fwrite(&g510s_data.m3, sizeof(struct m_data_s), 1, f);
+        fwrite(&g510s_data.mr, sizeof(struct m_data_s), 1, f);
+        fwrite(&g510s_data.clock_mode, sizeof(int), 1, f);
+        fwrite(&g510s_data.show_date, sizeof(int), 1, f);
+        fwrite(&g510s_data.color_fade, sizeof(int), 1, f);
+        fclose(f);
+        
+        // Update preset list
+        int found = 0;
+        for (int i = 0; i < preset_count; i++) {
+            if (strcmp(presets[i].name, name) == 0) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found && preset_count < MAX_PRESETS) {
+            strncpy(presets[preset_count].name, name, sizeof(presets[preset_count].name) - 1);
+            presets[preset_count].m1 = g510s_data.m1;
+            presets[preset_count].m2 = g510s_data.m2;
+            presets[preset_count].m3 = g510s_data.m3;
+            presets[preset_count].mr = g510s_data.mr;
+            presets[preset_count].clock_mode = g510s_data.clock_mode;
+            presets[preset_count].show_date = g510s_data.show_date;
+            presets[preset_count].color_fade = g510s_data.color_fade;
+            preset_count++;
+        }
+    }
+    free(path);
+}
+
+void load_preset(const char *name) {
+    for (int i = 0; i < preset_count; i++) {
+        if (strcmp(presets[i].name, name) == 0) {
+            g510s_data.m1 = presets[i].m1;
+            g510s_data.m2 = presets[i].m2;
+            g510s_data.m3 = presets[i].m3;
+            g510s_data.mr = presets[i].mr;
+            g510s_data.clock_mode = presets[i].clock_mode;
+            g510s_data.show_date = presets[i].show_date;
+            g510s_data.color_fade = presets[i].color_fade;
+            refresh_gui();
+            break;
+        }
+    }
+}
+
+// Bind preset to macro bank
+void bind_preset_to_bank(int bank, const char *preset_name) {
+    if (bank < 1 || bank > 4) return;
+    // Store binding - we use a simple convention: store in display.txt reference
+    char home_path[255];
+    char bind_path[512];
+    
+    strncpy(home_path, getenv("HOME"), sizeof(home_path));
+    if (home_path[0] == '\0') return;
+    
+    snprintf(bind_path, sizeof(bind_path), "%s/.config/g510s/bank%d_preset.txt", home_path, bank);
+    FILE *f = fopen(bind_path, "w");
+    if (f) {
+        fprintf(f, "%s\n", preset_name);
+        fclose(f);
+    }
+}
+
+// Read preset binding for a bank
+const char* get_bank_preset(int bank) {
+    static char preset_name[64];
+    char home_path[255];
+    char bind_path[512];
+    
+    strncpy(home_path, getenv("HOME"), sizeof(home_path));
+    if (home_path[0] == '\0') return "";
+    
+    snprintf(bind_path, sizeof(bind_path), "%s/.config/g510s/bank%d_preset.txt", home_path, bank);
+    FILE *f = fopen(bind_path, "r");
+    if (f) {
+        if (fgets(preset_name, sizeof(preset_name), f)) {
+            size_t len = strlen(preset_name);
+            if (len > 0 && preset_name[len-1] == '\n') preset_name[len-1] = '\0';
+        } else {
+            preset_name[0] = '\0';
+        }
+        fclose(f);
+        return preset_name;
+    }
+    return "";
+}
+
+
 // DBus property getter
 static GVariant* on_get_property(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
                                  const gchar *interface_name, const gchar *property_name, GError **error, gpointer user_data) {
     if (g_strcmp0(property_name, G510S_DBUS_PROP_MODE) == 0) {
-        // Fetch mode on demand
         return g_variant_new_int32(g510s_data.mkey_state);
     } else if (g_strcmp0(property_name, G510S_DBUS_PROP_COLOR) == 0) {
-        // Fetch color on demand
         int color[3] = {g510s_data.led_red, g510s_data.led_green, g510s_data.led_blue};
         return g_variant_new_fixed_array(G_VARIANT_TYPE_INT32, color, 3, sizeof(int));
     } else if (g_strcmp0(property_name, G510S_DBUS_PROP_COLORFADE) == 0) {
@@ -112,11 +298,10 @@ static GVariant* on_get_property(GDBusConnection *connection, const gchar *sende
     } else if (g_strcmp0(property_name, G510S_DBUS_PROP_GUIHIDDEN) == 0) {
         return g_variant_new_boolean(g510s_data.gui_hidden);
     }
-    // ... add more as needed ...
     return NULL;
 }
 
-// DBus property setter (allow changing settings via DBus)
+// DBus property setter
 static gboolean on_set_property(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
                                 const gchar *interface_name, const gchar *property_name, GVariant *value, GError **error, gpointer user_data) {
     if (g_strcmp0(property_name, G510S_DBUS_PROP_COLORFADE) == 0) {
@@ -138,11 +323,10 @@ static gboolean on_set_property(GDBusConnection *connection, const gchar *sender
         refresh_gui();
         return TRUE;
     }
-    // ... add more as needed ...
     return FALSE;
 }
 
-// Helper to emit PropertiesChanged (add all properties)
+// Helper to emit PropertiesChanged
 static void emit_properties_changed(GDBusConnection *connection) {
     GVariantBuilder builder;
     GVariantBuilder invalidated;
@@ -154,7 +338,6 @@ static void emit_properties_changed(GDBusConnection *connection) {
     g_variant_builder_add(&builder, "{sv}", G510S_DBUS_PROP_COLORFADE, g_variant_new_boolean(g510s_data.color_fade));
     g_variant_builder_add(&builder, "{sv}", G510S_DBUS_PROP_AUTOSAVE, g_variant_new_boolean(g510s_data.auto_save_on_quit));
     g_variant_builder_add(&builder, "{sv}", G510S_DBUS_PROP_GUIHIDDEN, g_variant_new_boolean(g510s_data.gui_hidden));
-    // ... add more as needed ...
     g_dbus_connection_emit_signal(
         connection,
         NULL,
@@ -164,6 +347,44 @@ static void emit_properties_changed(GDBusConnection *connection) {
         g_variant_new("(sa{sv}as)", G510S_DBUS_INTERFACE, &builder, &invalidated),
         NULL
     );
+}
+
+// DBus method handlers for preset operations
+static gboolean on_handle_save_preset(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
+                                     const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                     GDBusMethodInvocation *invocation, gpointer user_data) {
+    const char *name;
+    g_variant_get(parameters, "(s)", &name);
+    save_preset(name);
+    g_dbus_method_invocation_return_value(invocation, NULL);
+    return TRUE;
+}
+
+static gboolean on_handle_load_preset(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
+                                     const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                     GDBusMethodInvocation *invocation, gpointer user_data) {
+    const char *name;
+    g_variant_get(parameters, "(s)", &name);
+    load_preset(name);
+    save_config();
+    emit_properties_changed(connection);
+    refresh_gui();
+    g_dbus_method_invocation_return_value(invocation, NULL);
+    return TRUE;
+}
+
+static gboolean on_handle_list_presets(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
+                                      const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                      GDBusMethodInvocation *invocation, gpointer user_data) {
+    load_presets();
+    const char **names = g_new(const char *, preset_count + 1);
+    for (int i = 0; i < preset_count; i++) {
+        names[i] = presets[i].name;
+    }
+    names[preset_count] = NULL;
+    g_dbus_method_invocation_return_value(invocation, g_variant_new_strv(names, preset_count));
+    g_free(names);
+    return TRUE;
 }
 
 // DBus method handler
@@ -188,6 +409,12 @@ static void on_method_call(GDBusConnection *connection, const gchar *sender, con
         on_handle_run_macro(connection, sender, object_path, interface_name, method_name, parameters, invocation, user_data);
     } else if (g_strcmp0(method_name, "SaveConfig") == 0) {
         on_handle_save_config(connection, sender, object_path, interface_name, method_name, parameters, invocation, user_data);
+    } else if (g_strcmp0(method_name, "SavePreset") == 0) {
+        on_handle_save_preset(connection, sender, object_path, interface_name, method_name, parameters, invocation, user_data);
+    } else if (g_strcmp0(method_name, "LoadPreset") == 0) {
+        on_handle_load_preset(connection, sender, object_path, interface_name, method_name, parameters, invocation, user_data);
+    } else if (g_strcmp0(method_name, "ListPresets") == 0) {
+        on_handle_list_presets(connection, sender, object_path, interface_name, method_name, parameters, invocation, user_data);
     } else {
         g_dbus_method_invocation_return_error(invocation, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "Unknown method: %s", method_name);
     }
@@ -205,7 +432,6 @@ static gboolean on_handle_set_mode(GDBusConnection *connection, const gchar *sen
     }
     g510s_data.mkey_state = mode;
     set_mkey_state(mode);
-    // No more dbus_mode assignment
     emit_properties_changed(connection);
     refresh_gui();
     g_dbus_method_invocation_return_value(invocation, NULL);
@@ -214,8 +440,8 @@ static gboolean on_handle_set_mode(GDBusConnection *connection, const gchar *sen
 
 // SetColor handler: expects (iii b) for red, green, blue, save (bool)
 static gboolean on_handle_set_color(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                    const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                    GDBusMethodInvocation *invocation, gpointer user_data) {
+                                   const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                   GDBusMethodInvocation *invocation, gpointer user_data) {
     int r, g, b;
     gboolean save;
     g_variant_get(parameters, "(iiib)", &r, &g, &b, &save);
@@ -228,7 +454,6 @@ static gboolean on_handle_set_color(GDBusConnection *connection, const gchar *se
     g510s_data.led_green = g;
     g510s_data.led_blue = b;
     if (save) {
-        // Save to current mode
         if (g510s_data.mkey_state == 1) {
             g510s_data.m1.red = r;
             g510s_data.m1.green = g;
@@ -256,8 +481,8 @@ static gboolean on_handle_set_color(GDBusConnection *connection, const gchar *se
 
 // SetColorFade handler: expects (b)
 static gboolean on_handle_set_colorfade(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                        const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                        GDBusMethodInvocation *invocation, gpointer user_data) {
+                                       const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                       GDBusMethodInvocation *invocation, gpointer user_data) {
     gboolean fade;
     g_variant_get(parameters, "(b)", &fade);
     g510s_data.color_fade = fade;
@@ -270,8 +495,8 @@ static gboolean on_handle_set_colorfade(GDBusConnection *connection, const gchar
 
 // SetAutoSaveOnQuit handler: expects (b)
 static gboolean on_handle_set_autosave(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                        const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                        GDBusMethodInvocation *invocation, gpointer user_data) {
+                                       const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                       GDBusMethodInvocation *invocation, gpointer user_data) {
     gboolean autosave;
     g_variant_get(parameters, "(b)", &autosave);
     g510s_data.auto_save_on_quit = autosave;
@@ -284,8 +509,8 @@ static gboolean on_handle_set_autosave(GDBusConnection *connection, const gchar 
 
 // SetGuiHidden handler: expects (b)
 static gboolean on_handle_set_guihidden(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                        const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                        GDBusMethodInvocation *invocation, gpointer user_data) {
+                                       const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                       GDBusMethodInvocation *invocation, gpointer user_data) {
     gboolean hidden;
     g_variant_get(parameters, "(b)", &hidden);
     g510s_data.gui_hidden = hidden;
@@ -298,8 +523,8 @@ static gboolean on_handle_set_guihidden(GDBusConnection *connection, const gchar
 
 // Implementation for on_handle_save_config
 static gboolean on_handle_save_config(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                      const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                      GDBusMethodInvocation *invocation, gpointer user_data) {
+                                     const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                     GDBusMethodInvocation *invocation, gpointer user_data) {
     save_config();
     emit_properties_changed(connection);
     refresh_gui();
@@ -309,7 +534,6 @@ static gboolean on_handle_save_config(GDBusConnection *connection, const gchar *
 
 // Macro helpers
 static char* get_macro_by_index(int mode, int idx) {
-    // Helper for macro string access
     switch (mode) {
         case 1:
             switch (idx) {
@@ -405,8 +629,8 @@ static char* get_macro_by_index(int mode, int idx) {
 
 // GetMacro handler: expects (ii) for mode, index
 static gboolean on_handle_get_macro(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                    const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                    GDBusMethodInvocation *invocation, gpointer user_data) {
+                                   const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                   GDBusMethodInvocation *invocation, gpointer user_data) {
     int mode, idx;
     g_variant_get(parameters, "(ii)", &mode, &idx);
     char *macro = get_macro_by_index(mode, idx);
@@ -419,8 +643,8 @@ static gboolean on_handle_get_macro(GDBusConnection *connection, const gchar *se
 }
 // SetMacro handler: expects (ii s) for mode, index, value
 static gboolean on_handle_set_macro(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                    const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                    GDBusMethodInvocation *invocation, gpointer user_data) {
+                                   const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                   GDBusMethodInvocation *invocation, gpointer user_data) {
     int mode, idx;
     const char *value;
     g_variant_get(parameters, "(iis)", &mode, &idx, &value);
@@ -439,8 +663,8 @@ static gboolean on_handle_set_macro(GDBusConnection *connection, const gchar *se
 }
 // RunMacro handler: expects (ii) for mode, index
 static gboolean on_handle_run_macro(GDBusConnection *connection, const gchar *sender, const gchar *object_path,
-                                    const gchar *interface_name, const gchar *method_name, GVariant *parameters,
-                                    GDBusMethodInvocation *invocation, gpointer user_data) {
+                                   const gchar *interface_name, const gchar *method_name, GVariant *parameters,
+                                   GDBusMethodInvocation *invocation, gpointer user_data) {
     int mode, idx;
     g_variant_get(parameters, "(ii)", &mode, &idx);
     char *macro = get_macro_by_index(mode, idx);
@@ -448,8 +672,6 @@ static gboolean on_handle_run_macro(GDBusConnection *connection, const gchar *se
         g_dbus_method_invocation_return_error(invocation, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "Invalid mode or index");
         return TRUE;
     }
-    // Simulate macro run (replace with actual macro execution logic if needed)
-    // run_macro(mode, idx); // If you have such a function
     system(macro);
     printf("RunMacro: mode=%d idx=%d macro=%s\n", mode, idx, macro);
     g_dbus_method_invocation_return_value(invocation, NULL);
@@ -495,6 +717,15 @@ static void on_bus_acquired(GDBusConnection *connection, const gchar *name, gpoi
         "      <arg type='i' name='index' direction='in'/>"
         "    </method>"
         "    <method name='SaveConfig'/>"
+        "    <method name='SavePreset'>"
+        "      <arg type='s' name='name' direction='in'/>"
+        "    </method>"
+        "    <method name='LoadPreset'>"
+        "      <arg type='s' name='name' direction='in'/>"
+        "    </method>"
+        "    <method name='ListPresets'>"
+        "      <arg type='as' name='presets' direction='out'/>"
+        "    </method>"
         "    <property name='Mode' type='i' access='readwrite'/>"
         "    <property name='Color' type='ai' access='readwrite'/>"
         "    <property name='ColorFade' type='b' access='readwrite'/>"
@@ -519,20 +750,10 @@ static void on_bus_acquired(GDBusConnection *connection, const gchar *name, gpoi
 
     if (registration_id == 0) {
         g_warning("Failed to register DBus object");
-    } //else {
-    //     g_message("DBus object registered at %s with id %u", G510S_DBUS_PATH, registration_id);
-    //     g_message("Introspection XML:\n%s", introspection_xml);
-    //     GError *flush_error = NULL;
-    //     if (!g_dbus_connection_flush_sync(connection, NULL, &flush_error)) {
-    //         g_warning("DBus connection flush failed: %s", flush_error ? flush_error->message : "unknown error");
-    //         if (flush_error) g_error_free(flush_error);
-    //     } else {
-    //         g_message("DBus connection flush successful");
-    //     }
-    // }
+    }
 }
 
-// Move widget pointers to file scope for global access
+// Widget pointers for GUI access
 GtkRange *redscale_m1;
 GtkRange *greenscale_m1;
 GtkRange *bluescale_m1;
@@ -552,11 +773,189 @@ GtkEntry *entry_mrg1, *entry_mrg2, *entry_mrg3, *entry_mrg4, *entry_mrg5, *entry
 GtkCheckMenuItem *menuhidden;
 GtkCheckMenuItem *menuautosave;
 GtkCheckMenuItem *menucolorfade;
+GtkTextView *display_editor;       // In-GUI display editor
+GtkWidget *display_preview;        // Display preview drawing area
+GtkComboBoxText *preset_combo;     // Preset selector
+GtkComboBoxText *bank1_preset_combo; // Preset binding for bank 1
+GtkComboBoxText *bank2_preset_combo; // Preset binding for bank 2
+GtkComboBoxText *bank3_preset_combo; // Preset binding for bank 3
+GtkComboBoxText *bank4_preset_combo; // Preset binding for bank 4
 AppIndicator *indicator;
+
+// Display preview rendering function  
+static gboolean on_preview_draw(GtkWidget *widget, cairo_t *cr, gpointer data) {
+    int width = gtk_widget_get_allocated_width(widget);
+    int height = gtk_widget_get_allocated_height(widget);
+    
+    // The LCD uses 32-byte offset before pixel data, and pixels are 160*43/8 = 860 bytes
+    #define PREVIEW_LCD_OFFSET 32
+    int preview_pitch = DISPLAY_WIDTH / 8; // 20 bytes per row
+    
+    // Calculate scaling to fit the 160x43 display into the widget
+    double scale_x = (double)width / DISPLAY_WIDTH;
+    double scale_y = (double)height / DISPLAY_HEIGHT;
+    double scale = (scale_x < scale_y) ? scale_x : scale_y;
+    
+    int offset_x = (width - (int)(DISPLAY_WIDTH * scale)) / 2;
+    int offset_y = (height - (int)(DISPLAY_HEIGHT * scale)) / 2;
+    
+    // Clear background
+    cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
+    cairo_rectangle(cr, 0, 0, width, height);
+    cairo_fill(cr);
+    
+    // Draw border
+    cairo_set_source_rgb(cr, 0.3, 0.3, 0.3);
+    cairo_rectangle(cr, offset_x - 1, offset_y - 1, 
+                    (int)(DISPLAY_WIDTH * scale) + 2, (int)(DISPLAY_HEIGHT * scale) + 2);
+    cairo_stroke(cr);
+    
+    // Draw pixels - use correct byte index with LCD offset
+    for (int y = 0; y < DISPLAY_HEIGHT; y++) {
+        for (int x = 0; x < DISPLAY_WIDTH; x++) {
+            int byte_idx = PREVIEW_LCD_OFFSET + y * preview_pitch + x / 8;
+            int bit_idx = x % 8;
+            int pixel = preview_buffer[byte_idx] & (1 << bit_idx);
+            
+            if (pixel) {
+                cairo_set_source_rgb(cr, 0.168, 0.878, 0.298);
+            } else {
+                cairo_set_source_rgb(cr, 0.05, 0.05, 0.05);
+            }
+            
+            cairo_rectangle(cr, offset_x + (int)(x * scale), offset_y + (int)(y * scale),
+                          ceil(scale), ceil(scale));
+            cairo_fill(cr);
+        }
+    }
+    
+    return FALSE;
+}
+
+// Update preview from LCD buffer
+void update_preview() {
+    if (display_preview) {
+        gtk_widget_queue_draw(display_preview);
+    }
+}
 
 void on_menucolorfade_toggled(GtkCheckMenuItem *menuitem, gpointer user_data) {
     g510s_data.color_fade = gtk_check_menu_item_get_active(menuitem) ? 1 : 0;
     save_config();
+}
+
+// Save current preset from UI
+void on_save_preset_clicked(GtkButton *button, gpointer user_data) {
+    GtkWidget *dialog;
+    GtkWidget *content_area;
+    GtkWidget *entry;
+    
+    dialog = gtk_dialog_new_with_buttons("Save Preset",
+        GTK_WINDOW(user_data),
+        GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+        "_Save", GTK_RESPONSE_ACCEPT,
+        "_Cancel", GTK_RESPONSE_REJECT,
+        NULL);
+    
+    content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+    entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "Enter preset name (e.g. gaming_stats)...");
+    gtk_entry_set_text(GTK_ENTRY(entry), "my_preset");
+    gtk_container_add(GTK_CONTAINER(content_area), entry);
+    gtk_widget_show_all(dialog);
+    
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+        const char *name = gtk_entry_get_text(GTK_ENTRY(entry));
+        if (name && name[0]) {
+            save_preset(name);
+            
+            // Update presets combo
+            load_presets();
+            gtk_combo_box_text_remove_all(preset_combo);
+            gtk_combo_box_text_append_text(preset_combo, "None");
+            for (int i = 0; i < preset_count; i++) {
+                gtk_combo_box_text_append_text(preset_combo, presets[i].name);
+            }
+            gtk_combo_box_set_active(GTK_COMBO_BOX(preset_combo), 0);
+            
+            // Update bank combos
+            for (int b = 1; b <= 4; b++) {
+                GtkComboBoxText *bank_combo = NULL;
+                switch (b) {
+                    case 1: bank_combo = bank1_preset_combo; break;
+                    case 2: bank_combo = bank2_preset_combo; break;
+                    case 3: bank_combo = bank3_preset_combo; break;
+                    case 4: bank_combo = bank4_preset_combo; break;
+                }
+                if (bank_combo) {
+                    const char *current = get_bank_preset(b);
+                    gtk_combo_box_text_remove_all(bank_combo);
+                    gtk_combo_box_text_append_text(bank_combo, "None");
+                    int active_idx = 0;
+                    for (int i = 0; i < preset_count; i++) {
+                        gtk_combo_box_text_append_text(bank_combo, presets[i].name);
+                        if (strcmp(presets[i].name, current) == 0) {
+                            active_idx = i + 1;
+                        }
+                    }
+                    gtk_combo_box_set_active(GTK_COMBO_BOX(bank_combo), active_idx);
+                }
+            }
+            
+            display_notification("Preset saved!", 2000, 0);
+        }
+    }
+    gtk_widget_destroy(dialog);
+}
+
+// Load preset from UI
+void on_load_preset_clicked(GtkButton *button, gpointer user_data) {
+    const char *name = gtk_combo_box_text_get_active_text(preset_combo);
+    if (name && strcmp(name, "None") != 0) {
+        load_preset(name);
+        save_config();
+        display_notification("Preset loaded!", 2000, 0);
+    }
+}
+
+// Bind preset to bank from UI
+void on_bank_preset_changed(GtkComboBox *combo, gpointer user_data) {
+    int bank = GPOINTER_TO_INT(user_data);
+    const char *name = gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(combo));
+    if (name) {
+        if (strcmp(name, "None") == 0) {
+            bind_preset_to_bank(bank, "");
+        } else {
+            bind_preset_to_bank(bank, name);
+        }
+    }
+}
+
+// Display editor text changed - saves to display.txt
+void on_display_editor_changed(GtkTextBuffer *buffer, gpointer user_data) {
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds(buffer, &start, &end);
+    char *text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+    
+    // Save to display.txt
+    char home_path[255];
+    strncpy(home_path, getenv("HOME"), sizeof(home_path));
+    if (home_path[0]) {
+        char filepath[512];
+        snprintf(filepath, sizeof(filepath), "%s/.config/g510s/display.txt", home_path);
+        FILE *f = fopen(filepath, "w");
+        if (f) {
+            fprintf(f, "%s", text);
+            fclose(f);
+        }
+    }
+    g_free(text);
+}
+
+// Refresh preview from display buffer
+gboolean on_preview_refresh(gpointer data) {
+    update_preview();
+    return G_SOURCE_CONTINUE;
 }
 
 // --- GUI refresh implementation ---
@@ -695,15 +1094,11 @@ int main(int argc, char *argv[]) {
       }
     } else if (!strcmp(argv[i],"--terminal")) {
       terminal_mode = 1;
-      // Capture the rest of the command line as the terminal command
       if (argv[i+1]) {
-        // Skip past --terminal flag
         i++;
-        // Copy first argument
         strncpy(terminal_cmd, argv[i], sizeof(terminal_cmd)-1);
         terminal_cmd[sizeof(terminal_cmd)-1] = '\0';
         i++;
-        // Append remaining arguments
         while (i < argc) {
           strncat(terminal_cmd, " ", sizeof(terminal_cmd)-strlen(terminal_cmd)-1);
           strncat(terminal_cmd, argv[i], sizeof(terminal_cmd)-strlen(terminal_cmd)-1);
@@ -728,7 +1123,6 @@ int main(int argc, char *argv[]) {
     help = 1;
   }
 
-  // print help and exit
   if (help) {
     printf("Usage: g510s <option> <value>\n\n");
     printf("Options:\n");
@@ -738,18 +1132,17 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
-  // enable debug
   if (debug != 0) {
     libg15Debug(debug);
     printf("G510s: debugging enabled, level %i\n", debug);
   }
   
   // init libg15
-  if (setupLibG15(0x46d, 0xc22d, 0) == G15_NO_ERROR) { // g510/g510s no audio
+  if (setupLibG15(0x46d, 0xc22d, 0) == G15_NO_ERROR) {
     printf("G510s: found device 046d:c22d\n");
     device_found = 1;
     usb_id="046d:c22d";
-  } else if (setupLibG15(0x46d, 0xc22e, 0) == G15_NO_ERROR) { // g510/g510s with audio
+  } else if (setupLibG15(0x46d, 0xc22e, 0) == G15_NO_ERROR) {
     printf("G510s: found device 046d:c22e\n");
     device_found = 1;
     usb_id="046d:c22e";
@@ -758,9 +1151,7 @@ int main(int argc, char *argv[]) {
     device_found = 0;
   }
   
-  // init uinput only if a device is found
   if (device_found) {
-    // media keys wont work without uinput
     if (init_uinput() != 0) {
       printf("G510s: failed to initialize uinput, media keys not available\n");
     }
@@ -778,18 +1169,18 @@ int main(int argc, char *argv[]) {
   // try to load previously saved data
   load_config();
   
+  // Load presets
+  load_presets();
+  
   // start threads
   pthread_create(&server_thread, NULL, server_function, lcdlist);
   pthread_create(&update_thread, NULL, update_function, lcdlist);
   pthread_create(&key_thread, NULL, key_function, lcdlist);
-  //pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-  //pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
   
   // init gtk
   gtk_init(&argc, &argv);
   
   builder = gtk_builder_new();
-  // FIXME: hardcode to installed path
   gtk_builder_add_from_file(builder, "/usr/local/share/g510s/g510s.glade", NULL);
   
   window = GTK_WIDGET(gtk_builder_get_object(builder, "window"));
@@ -889,16 +1280,84 @@ int main(int argc, char *argv[]) {
   entry_mrg17 = GTK_ENTRY(gtk_builder_get_object(builder, "entry_mrg17"));
   entry_mrg18 = GTK_ENTRY(gtk_builder_get_object(builder, "entry_mrg18"));
   
+  // New UI elements for editor, presets, preview
+  display_editor = GTK_TEXT_VIEW(gtk_builder_get_object(builder, "display_editor"));
+  display_preview = GTK_WIDGET(gtk_builder_get_object(builder, "display_preview"));
+  preset_combo = GTK_COMBO_BOX_TEXT(gtk_builder_get_object(builder, "preset_combo"));
+  bank1_preset_combo = GTK_COMBO_BOX_TEXT(gtk_builder_get_object(builder, "bank1_preset_combo"));
+  bank2_preset_combo = GTK_COMBO_BOX_TEXT(gtk_builder_get_object(builder, "bank2_preset_combo"));
+  bank3_preset_combo = GTK_COMBO_BOX_TEXT(gtk_builder_get_object(builder, "bank3_preset_combo"));
+  bank4_preset_combo = GTK_COMBO_BOX_TEXT(gtk_builder_get_object(builder, "bank4_preset_combo"));
+  
+  // Setup preview drawing area
+  if (display_preview) {
+      g_signal_connect(display_preview, "draw", G_CALLBACK(on_preview_draw), NULL);
+      g_timeout_add(200, on_preview_refresh, NULL);
+      gtk_widget_set_size_request(display_preview, 320, 86);
+  }
+  
+  // Setup display editor
+  if (display_editor) {
+      GtkTextBuffer *buffer = gtk_text_view_get_buffer(display_editor);
+      
+      // Load current display.txt content
+      char home_path[255];
+      strncpy(home_path, getenv("HOME"), sizeof(home_path));
+      if (home_path[0]) {
+          char filepath[512];
+          snprintf(filepath, sizeof(filepath), "%s/.config/g510s/display.txt", home_path);
+          FILE *f = fopen(filepath, "r");
+          if (f) {
+              fseek(f, 0, SEEK_END);
+              long fsize = ftell(f);
+              fseek(f, 0, SEEK_SET);
+              char *content = malloc(fsize + 1);
+              fread(content, 1, fsize, f);
+              content[fsize] = '\0';
+              gtk_text_buffer_set_text(buffer, content, -1);
+              free(content);
+              fclose(f);
+          }
+      }
+      
+      g_signal_connect(buffer, "changed", G_CALLBACK(on_display_editor_changed), NULL);
+  }
+  
+  // Setup preset combos
+  if (preset_combo) {
+      gtk_combo_box_text_append_text(preset_combo, "None");
+      for (int i = 0; i < preset_count; i++) {
+          gtk_combo_box_text_append_text(preset_combo, presets[i].name);
+      }
+      gtk_combo_box_set_active(GTK_COMBO_BOX(preset_combo), 0);
+  }
+  
+  // Setup bank preset binding combos
+  GtkComboBoxText *bank_combos[] = {bank1_preset_combo, bank2_preset_combo, bank3_preset_combo, bank4_preset_combo};
+  for (int b = 0; b < 4; b++) {
+      if (bank_combos[b]) {
+          int bank = b + 1;
+          const char *current = get_bank_preset(bank);
+          gtk_combo_box_text_append_text(bank_combos[b], "None");
+          int active_idx = 0;
+          for (int i = 0; i < preset_count; i++) {
+              gtk_combo_box_text_append_text(bank_combos[b], presets[i].name);
+              if (strcmp(presets[i].name, current) == 0) {
+                  active_idx = i + 1;
+              }
+          }
+          gtk_combo_box_set_active(GTK_COMBO_BOX(bank_combos[b]), active_idx);
+          g_signal_connect(bank_combos[b], "changed", G_CALLBACK(on_bank_preset_changed), GINT_TO_POINTER(bank));
+      }
+  }
+  
   menuhidden = GTK_CHECK_MENU_ITEM(gtk_builder_get_object(builder, "menuhidden"));
   menuautosave = GTK_CHECK_MENU_ITEM(gtk_builder_get_object(builder, "menuautosaveonquit"));
   menucolorfade = GTK_CHECK_MENU_ITEM(gtk_builder_get_object(builder, "menucolorfade"));
-  // Set initial value from menu state
   
   // indicator
   indicator_menu = GTK_WIDGET(gtk_builder_get_object(builder, "indicator_menu"));
-  // FIXME: hardcode to installed path
   indicator = app_indicator_new("G510s", "/usr/local/share/g510s/g510s.svg", APP_INDICATOR_CATEGORY_HARDWARE);
-  // FIXME: hardcode to installed path
   app_indicator_set_attention_icon(indicator, "/usr/local/share/g510s/g510s-alert.svg");
   app_indicator_set_menu(indicator, GTK_MENU(indicator_menu));
   
@@ -1011,21 +1470,18 @@ int main(int argc, char *argv[]) {
     gtk_check_menu_item_set_active(menuhidden, FALSE);
   }
 
-  // Set menuautosave toggle state based on loaded config
   if (g510s_data.auto_save_on_quit == 1) {
       gtk_check_menu_item_set_active(menuautosave, TRUE);
   } else {
       gtk_check_menu_item_set_active(menuautosave, FALSE);
   }
   
-  // Set menucolorfade toggle state based on loaded config
   if (g510s_data.color_fade == 1) {
       gtk_check_menu_item_set_active(menucolorfade, TRUE);
   } else {
       gtk_check_menu_item_set_active(menucolorfade, FALSE);
   }
   
-  // now we're ready to update the keyboard
   if (device_found) {
     set_mkey_state(g510s_data.mkey_state);
     app_indicator_set_status(indicator, APP_INDICATOR_STATUS_ACTIVE);
@@ -1033,7 +1489,6 @@ int main(int argc, char *argv[]) {
     app_indicator_set_status(indicator, APP_INDICATOR_STATUS_ATTENTION);
   }
   
-  // gtk_check_menu_item_set_active(menuautosave, TRUE);
   // --- DBus setup ---
   guint owner_id = g_bus_own_name(
       G_BUS_TYPE_SESSION,
@@ -1045,17 +1500,12 @@ int main(int argc, char *argv[]) {
       NULL,
       NULL
   );
-  // --- end DBus setup ---
 
   gtk_main();
   
   // notify threads to exit
   leaving = 1;
   
-  // key_thread needs to be canceled
-  //pthread_cancel(key_thread);
-  
-  // save data before leaving
   if (menuautosave) {
       g510s_data.auto_save_on_quit = gtk_check_menu_item_get_active(menuautosave) ? 1 : 0;
   }
@@ -1063,16 +1513,11 @@ int main(int argc, char *argv[]) {
       save_config();
   }
 
-  // DBus cleanup
   g_bus_unown_name(owner_id);
   
-  // close gracefully
   if (device_found) {
-    // close uinput
     exit_uinput();
-    // close libg15
     exitLibG15();
-    // return keyboard to default
     if (usb_id) {
       char cmd[128];
       snprintf(cmd, sizeof(cmd), "usbreset %s", usb_id);
@@ -1080,7 +1525,6 @@ int main(int argc, char *argv[]) {
     }
   }
   
-  // clean up lcdlist
   lcdlist_destroy(&lcdlist);
   
   return 0;

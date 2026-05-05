@@ -126,7 +126,27 @@ struct g510s_data_s {
   int led_red;   // Current LED color, set by DBus or threads
   int led_green;
   int led_blue;
+  
+  // Notification system
+  char notifications[10][256];  // Queue of notifications
+  int notification_count;
+  int notification_display_time; // ms to display each notification
+  int notification_position;     // Current position in queue
 } g510s_data;
+
+// Preset structure
+typedef struct {
+  char name[64];
+  struct m_data_s m1;
+  struct m_data_s m2;
+  struct m_data_s m3;
+  struct m_data_s mr;
+  int clock_mode;
+  int show_date;
+  int color_fade;
+} preset_t;
+
+#define MAX_PRESETS 20
 
 int leaving;
 int update;

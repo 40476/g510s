@@ -35,6 +35,11 @@
 
 extern AppIndicator *indicator;
 
+// Preview buffer for GUI - copy of the LCD buffer before sending to device
+extern unsigned char preview_buffer[G15_BUFFER_LEN];
+extern void update_preview();
+extern void display_notification(const char *text, int duration_ms, int priority);
+
 void *lcd_client_function(void *display) {
   lcdnode_t *g15node = display;
   lcd_t *client_lcd = g15node->lcd;

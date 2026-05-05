@@ -18,18 +18,15 @@
  *  Copyright © 2015 John Augustine
  *  Copyright © 2025 usr_40476
  */
-
-
 #include <stdio.h>
 #include <stdlib.h>
-#include <linux/time.h>
 #include <pthread.h>
 #include <libg15.h>
 #include <libg15render.h>
 #include <string.h>
 #include <unistd.h>
 #include <math.h>
-#include <ctype.h> // For isalnum
+#include <ctype.h> // For isalnum, isdigit
 #include <pty.h>
 #include <utmp.h>
 #include <sys/select.h>
@@ -42,6 +39,9 @@
 
 
 // Define terminal variables (declared as extern in g510s.h)
+
+// Preview buffer - declared in g510s.c
+extern unsigned char preview_buffer[G15_BUFFER_LEN];
 extern int terminal_mode;
 extern char terminal_cmd[1024];
 
@@ -80,6 +80,14 @@ typedef struct {
     char value[MAX_VAR_VALUE];
 } script_var_t;
 
+// Conditional execution state
+typedef struct {
+    int active;        // Are we inside a branch?
+    int in_block;      // Are we inside an IF body that should execute?
+    int skip_else;     // Should we skip the ELSE/ELIF?
+    int nesting;       // Nesting level tracking
+} cond_state_t;
+
 
 // Simple hash function to uniquely identify a graph by its command string
 static unsigned int hash_cmd(const char *str) {
@@ -112,6 +120,15 @@ static int cache_time_threshold = 10;     // ...within this many seconds
 static int color_mode = 0;                // Color mode (0=normal, 1=stipple, 2=checkerboard)
 static int scanline_effect = 0;          // Scanline effect (0=off, 1=on)
 
+// Notification state
+static long long notification_start_time = 0;
+static int notification_active = 0;
+static int notification_duration = 3000; // Default 3 seconds
+static char notification_text[256] = {0};
+static int notification_priority = 0;
+static int notification_scroll_pos = 0;
+static long long notification_scroll_time = 0;
+
 // Command cache structure
 typedef struct {
     unsigned int id;          // Hash of the command
@@ -124,6 +141,16 @@ typedef struct {
 #define MAX_CACHE_ENTRIES 32
 static cmd_cache_t cmd_cache[MAX_CACHE_ENTRIES];
 static int cmd_cache_count = 0;
+
+// Label storage for GOTO support
+typedef struct {
+    char name[64];
+    int line_number;
+} label_t;
+
+#define MAX_LABELS 32
+static label_t labels[MAX_LABELS];
+static int label_count = 0;
 
 
 static void trim(char *str) {
@@ -254,6 +281,90 @@ static void substitute_vars(char *line, script_var_t *vars, int var_count) {
     line[MAX_LINE_LEN-1] = 0;
 }
 
+// Notification display function - renders notification text on canvas
+static void render_notification(g15canvas *canvas) {
+    if (!notification_active) return;
+    
+    long long now = get_now_ms();
+    if (now - notification_start_time > notification_duration) {
+        notification_active = 0;
+        return;
+    }
+    
+    char display_text[256];
+    int text_len = strlen(notification_text);
+    int max_chars = DISPLAY_WIDTH / 5; // ~5px per char for font size 2
+    
+    if (text_len > max_chars) {
+        // Scrolling text
+        long long scroll_interval = 200; // ms between scroll steps
+        if (now - notification_scroll_time > scroll_interval) {
+            notification_scroll_pos++;
+            notification_scroll_time = now;
+        }
+        if (notification_scroll_pos > text_len) {
+            notification_scroll_pos = 0;
+        }
+        
+        // Extract visible portion
+        int visible_len = text_len - notification_scroll_pos;
+        if (visible_len > max_chars) visible_len = max_chars;
+        strncpy(display_text, notification_text + notification_scroll_pos, visible_len);
+        display_text[visible_len] = '\0';
+    } else {
+        strncpy(display_text, notification_text, sizeof(display_text));
+    }
+    
+    // Draw notification bar at top of display
+    // First, draw a border/frame
+    for (int x = 0; x < DISPLAY_WIDTH; x++) {
+        g15r_setPixel(canvas, x, 0, 1);
+        g15r_setPixel(canvas, x, 10, 1);
+    }
+    for (int y = 0; y <= 10; y++) {
+        g15r_setPixel(canvas, 0, y, 1);
+        g15r_setPixel(canvas, DISPLAY_WIDTH - 1, y, 1);
+    }
+    
+    // Draw notification icon based on priority
+    if (notification_priority > 0) {
+        // Draw attention indicator (filled area on left)
+        for (int y = 1; y < 10; y++) {
+            for (int x = 1; x < 5; x++) {
+                g15r_setPixel(canvas, x, y, 1);
+            }
+        }
+        // Render text after icon
+        g15r_renderString(canvas, (unsigned char *)display_text, 0, 0, 6, 2);
+    } else {
+        // Render text
+        int px = (DISPLAY_WIDTH - (text_len > max_chars ? max_chars : text_len) * 5) / 2;
+        if (px < 1) px = 1;
+        g15r_renderString(canvas, (unsigned char *)display_text, 0, 0, px, 2);
+    }
+}
+
+// Public notification API
+void display_notification(const char *text, int duration_ms, int priority) {
+    strncpy(notification_text, text, sizeof(notification_text) - 1);
+    notification_text[sizeof(notification_text) - 1] = '\0';
+    notification_duration = (duration_ms > 0) ? duration_ms : 3000;
+    notification_priority = priority;
+    notification_scroll_pos = 0;
+    notification_start_time = get_now_ms();
+    notification_scroll_time = notification_start_time;
+    notification_active = 1;
+    
+    // Also store in notification queue
+    if (g510s_data.notification_count < 10) {
+        strncpy(g510s_data.notifications[g510s_data.notification_count], text, 255);
+        g510s_data.notifications[g510s_data.notification_count][255] = '\0';
+        g510s_data.notification_count++;
+    }
+    g510s_data.notification_display_time = notification_duration;
+    g510s_data.notification_position = 0;
+}
+
 static int render_scripted_display(g15canvas *canvas, const char *filepath) {
     FILE *f = fopen(filepath, "r");
     if (!f) return 0;
@@ -266,9 +377,129 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
     script_var_t vars[MAX_SCRIPT_VARS];
     int var_count = 0;
 
+    // --- Conditional state ---
+    cond_state_t cond = {0};
+
+    // --- GOTO/Label state ---
+    label_count = 0;
+    int goto_line = -1;
+    int current_line_num = 0;
+    
+    // First pass: collect labels for GOTO support
     while (fgets(line, sizeof(line), f)) {
+        current_line_num++;
+        trim(line);
+        if (line[0] == '#' || line[0] == '\0') continue;
+        
+        if (strncmp(line, "LABEL:", 6) == 0) {
+            if (label_count < MAX_LABELS) {
+                strncpy(labels[label_count].name, line + 6, sizeof(labels[label_count].name) - 1);
+                labels[label_count].name[sizeof(labels[label_count].name) - 1] = '\0';
+                trim(labels[label_count].name);
+                labels[label_count].line_number = current_line_num;
+                label_count++;
+            }
+        }
+    }
+    
+    // Reset file for second pass (rendering)
+    rewind(f);
+    current_line_num = 0;
+    
+    while (fgets(line, sizeof(line), f)) {
+        current_line_num++;
         trim(line);
         if (line[0] == 0 || line[0] == '#') continue;
+
+        // --- GOTO: jump to label ---
+        if (strncmp(line, "GOTO:", 5) == 0) {
+            char target[64] = {0};
+            strncpy(target, line + 5, sizeof(target) - 1);
+            target[sizeof(target) - 1] = '\0';
+            trim(target);
+            
+            for (int i = 0; i < label_count; i++) {
+                if (strcmp(labels[i].name, target) == 0) {
+                    // Seek to that line
+                    fseek(f, 0, SEEK_SET);
+                    current_line_num = 0;
+                    while (current_line_num < labels[i].line_number - 1 && fgets(line, sizeof(line), f)) {
+                        current_line_num++;
+                    }
+                    break;
+                }
+            }
+            continue;
+        }
+
+        // --- IF/ELIF/ELSE/ENDIF: conditional rendering ---
+        if (strncmp(line, "IF,", 3) == 0) {
+            cond.nesting++;
+            
+            // Evaluate the condition (execute the cmd after IF,)
+            char *cond_cmd = line + 3;
+            char output[MAX_CMD_OUTPUT] = {0};
+            exec_cmd(cond_cmd, output, sizeof(output));
+            int cond_result = (atoi(output) != 0) || (strcmp(output, "true") == 0) || (strcmp(output, "yes") == 0) || (strlen(output) > 0 && atoi(output) == 0 && output[0] != '0');
+            
+            if (cond_result) {
+                cond.in_block = 1;
+                cond.skip_else = 1;
+            } else {
+                cond.in_block = 0;
+                cond.skip_else = 0;
+            }
+            cond.active = 1;
+            continue;
+        }
+        
+        if (strncmp(line, "ELIF,", 5) == 0) {
+            if (cond.nesting == 0) continue;
+            
+            if (cond.skip_else) {
+                cond.in_block = 0;
+            } else {
+                // Evaluate the condition
+                char *cond_cmd = line + 5;
+                char output[MAX_CMD_OUTPUT] = {0};
+                exec_cmd(cond_cmd, output, sizeof(output));
+                int cond_result = (atoi(output) != 0) || (strcmp(output, "true") == 0) || (strcmp(output, "yes") == 0);
+                
+                if (cond_result) {
+                    cond.in_block = 1;
+                    cond.skip_else = 1;
+                } else {
+                    cond.in_block = 0;
+                }
+            }
+            continue;
+        }
+        
+        if (strncmp(line, "ELSE", 4) == 0 && line[4] != ',') {
+            if (cond.nesting == 0) continue;
+            
+            if (cond.skip_else) {
+                cond.in_block = 0;
+            } else {
+                cond.in_block = 1;
+            }
+            continue;
+        }
+        
+        if (strncmp(line, "ENDIF", 5) == 0) {
+            if (cond.nesting > 0) {
+                cond.nesting--;
+                cond.in_block = 0;
+                cond.skip_else = 0;
+                cond.active = (cond.nesting > 0);
+            }
+            continue;
+        }
+        
+        // If we're in a conditional block that's not active, skip rendering
+        if (cond.active && !cond.in_block) {
+            continue;
+        }
 
 
         // --- 1. Save the RAW line before substitution for stable Hashing ---
@@ -334,14 +565,14 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                     color_mode = value;
                 } else if (strcmp(key, "scanline") == 0) {
                     scanline_effect = value ? 1 : 0;
+                } else if (strcmp(key, "notify") == 0) {
+                    // Used to set notification display time in ms
+                    notification_duration = value;
                 }
-                
-                // printf("SET: %s = %d\n", key, value);
             }
             continue;
         }
 
-        
 
         // Rectangle: RECT,x,y,w,h[,fillmode] (filled or outline, fill controlled by fillmode)
         int fill_shape = 0, black_fill = 0, fill_mode = 0, outline_black = 0;
@@ -651,12 +882,9 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                     int is_vert = (strcasecmp(type, "VBATCHBAR") == 0);
                     int values[64], count = 0;
                     
-                    // DEBUG: See the exact raw output from soundshot
-                    // fprintf(stderr, "[DEBUG] Raw Output: %s\n", output);
-
                     char *p_out = output;
                     while (p_out && *p_out && count < 64) {
-                        // 1. Skip anything that isn't part of a number (like | or spaces)
+                        // 1. Skip anything that isn't part of a number
                         while (*p_out && !isdigit(*p_out) && *p_out != '-') {
                             p_out++;
                         }
@@ -666,15 +894,12 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                         // 2. Convert current position to integer
                         values[count++] = atoi(p_out);
 
-                        // 3. Move pointer past the number we just read so we don't read it twice
+                        // 3. Move pointer past the number we just read
                         if (*p_out == '-') p_out++; 
                         while (isdigit(*p_out)) {
                             p_out++;
                         }
                     }
-
-                    // DEBUG: Verify coordinates and count
-                    // fprintf(stderr, "[DEBUG] Graph: %d,%d %dx%d | Bins: %d\n", x, y, w, h, count);
 
                     if (count > 0 && w > 0 && h > 0) {
                         float bar_area = (float)(is_vert ? h : w);
@@ -687,7 +912,6 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                             if (val > 100) val = 100;
                             
                             int bar_len = (bar_max_len * val) / 100;
-                            // Visual safety: if there's any value, show at least 1 pixel
                             if (val > 0 && bar_len == 0) bar_len = 1;
 
                             int start_p = (int)(i * step);
@@ -698,11 +922,9 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                                 for (int l = 0; l < bar_len; l++) {
                                     int dx, dy;
                                     if (is_vert) {
-                                        // VBAR: l is width, p is vertical position
                                         dx = flip_x ? (w - 1 - l) : l;
                                         dy = flip_y ? p : (h - 1 - p);
                                     } else {
-                                        // BAR: p is horizontal position, l is height
                                         dx = flip_x ? (w - 1 - p) : p;
                                         dy = flip_y ? l : (h - 1 - l);
                                     }
@@ -830,34 +1052,27 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
 
                         // 4. Draw the lines
                         for (int i = 0; i < limit - 1; ++i) {
-                            // Map sequence: Oldest to Newest
                             int p1 = (gb->filled) ? (gb->pos + i) % cur_w : i;
                             int p2 = (gb->filled) ? (gb->pos + i + 1) % cur_w : i + 1;
 
                             int v1 = gb->values[p1];
                             int v2 = gb->values[p2];
 
-                            // Map values to pixel heights
                             int scaled1 = (v1 - current_min) * (cur_h - 1) / range;
                             int scaled2 = (v2 - current_min) * (cur_h - 1) / range;
 
-                            // Handle Y-axis Flip (!)
                             int y1, y2;
                             if (flip_y) {
-                                // Flipped: High values at bottom
                                 y1 = y + scaled1;
                                 y2 = y + scaled2;
                             } else {
-                                // Standard: High values at top
                                 y1 = y + cur_h - 1 - scaled1;
                                 y2 = y + cur_h - 1 - scaled2;
                             }
 
-                            // Handle X-axis Flip (!)
                             int x1 = x + (flip_x ? (limit - 1 - i) : i);
                             int x2 = x + (flip_x ? (limit - 2 - i) : i + 1);
 
-                            // Clamping
                             if (y1 < y) y1 = y; if (y1 >= y + cur_h) y1 = y + cur_h - 1;
                             if (y2 < y) y2 = y; if (y2 >= y + cur_h) y2 = y + cur_h - 1;
 
@@ -880,23 +1095,20 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
         *cmd_end = 0;
         char *cmd = cmd_start+2;
 
-        // --- Begin: Remove all newlines from command if ^ before first // ---
+        // --- Remove newlines from command if ^ before first // ---
         int remove_newlines = 0;
         if (cmd_start > line && *(cmd_start-1) == '^') {
             remove_newlines = 1;
-            *(cmd_start-1) = '\0'; // Remove the ^ from the line
+            *(cmd_start-1) = '\0';
         }
-        // --- End: Remove all newlines from command if ^ before first // ---
 
         if (sscanf(line, "%d,%d,%c,%d,%d", &tx, &ty, &align_c, &angle, &size) == 5) {
             char output[MAX_CMD_OUTPUT] = {0};
             exec_cmd(cmd, output, sizeof(output));
-            // Remove trailing newlines from output
             size_t outlen = strlen(output);
             while (outlen > 0 && (output[outlen - 1] == '\n' || output[outlen - 1] == '\r')) {
                 output[--outlen] = '\0';
             }
-            // Remove all newlines if requested
             if (remove_newlines) {
                 char *src = output, *dst = output;
                 while (*src) {
@@ -915,7 +1127,7 @@ static int render_scripted_display(g15canvas *canvas, const char *filepath) {
                 case 0: char_width = 3; break;
                 case 1: char_width = 4; break;
                 case 2: char_width = 7; break;
-                default: char_width = 5; break; // fallback for other sizes
+                default: char_width = 5; break;
             }
             int spacing = 1;
             int total_width = text_len * (char_width + spacing) - spacing;
@@ -951,7 +1163,6 @@ static void apply_display_settings(g15canvas *canvas) {
                 int bit_idx = (y * DISPLAY_WIDTH + x) % 8;
                 int pixel = canvas->buffer[byte_idx] & (1 << bit_idx);
                 if (pixel) {
-                    // Use a deterministic dither pattern: checkerboard based on coordinates
                     int pattern = ((x + y) % 2) * 255;
                     if (pattern > threshold) {
                         canvas->buffer[byte_idx] &= ~(1 << bit_idx);
@@ -1040,19 +1251,17 @@ void init_terminal() {
     
     if (pid == 0) {
         // Child process - run shell
-        setenv("TERM", "dumb", 1);  // Use "dumb" terminal to minimize escape sequences
+        setenv("TERM", "dumb", 1);
         setenv("ROWS", "8", 1);
         setenv("COLS", "53", 1);
-        setenv("PS1", "$ ", 1);  // Simple prompt
+        setenv("PS1", "$ ", 1);
         setenv("PS2", "", 1);
         
-        // Run the configured terminal command, or use $SHELL, or fall back to /bin/sh
         if (terminal_cmd[0]) {
             execl("/bin/sh", "sh", "-c", terminal_cmd, (char *)NULL);
         } else {
             char *shell = getenv("SHELL");
             if (shell && shell[0]) {
-                // Try to avoid reading startup files for bash
                 if (strstr(shell, "bash") != NULL) {
                     execl(shell, "bash", "--norc", "--noprofile", (char *)NULL);
                 } else {
@@ -1073,10 +1282,8 @@ void init_terminal() {
     terminal_cursor_row = 0;
     terminal_cursor_col = 0;
     
-    // Clear the terminal buffer
     memset(terminal_buffer, 0, sizeof(terminal_buffer));
     
-    // Set non-blocking
     int flags = fcntl(terminal_fd, F_GETFL, 0);
     if (flags != -1) {
         fcntl(terminal_fd, F_SETFL, flags | O_NONBLOCK);
@@ -1113,7 +1320,6 @@ static void read_terminal_output() {
     
     while ((n = read(terminal_fd, buf, sizeof(buf) - 1)) > 0) {
         for (ssize_t i = 0; i < n; i++) {
-            // Handle circular buffer
             int pos = (terminal_buf_start + terminal_buf_len) % sizeof(terminal_buffer);
             terminal_buffer[pos] = buf[i];
             if (terminal_buf_len < (int)sizeof(terminal_buffer)) {
@@ -1136,12 +1342,11 @@ static void render_terminal(g15canvas *canvas) {
         return;
     }
     
-    // Read any new output
     pthread_mutex_unlock(&terminal_mutex);
     read_terminal_output();
     pthread_mutex_lock(&terminal_mutex);
     
-    // Parse buffer into lines for display (filter ANSI escape sequences)
+    // Parse buffer into lines for display
     char lines[TERMINAL_ROWS][TERMINAL_COLS + 1];
     for (int i = 0; i < TERMINAL_ROWS; i++) {
         memset(lines[i], 0, TERMINAL_COLS + 1);
@@ -1150,53 +1355,44 @@ static void render_terminal(g15canvas *canvas) {
     int line_num = 0;
     int col_num = 0;
     int buf_pos = terminal_buf_start;
-    int esc_state = 0;  // 0=normal, 1=got ESC, 2=got CSI [ , 3=got OSC ]
-    // esc_state 2: skip until final byte (0x40-0x7e)
+    int esc_state = 0;
     
     for (int i = 0; i < terminal_buf_len && line_num < TERMINAL_ROWS; i++) {
         unsigned char c = (unsigned char)terminal_buffer[buf_pos];
         buf_pos = (buf_pos + 1) % sizeof(terminal_buffer);
         
-        // Handle ANSI escape sequences
         if (esc_state == 1) {
             if (c == '[') {
-                esc_state = 2;  // CSI sequence
+                esc_state = 2;
                 continue;
             } else if (c == ']') {
-                esc_state = 3;  // OSC sequence
+                esc_state = 3;
                 continue;
             } else if (c == '(' || c == ')') {
-                // Designate character set - skip next char
                 esc_state = 4;
                 continue;
             } else {
-                // Not a recognized escape sequence, treat as normal
                 esc_state = 0;
             }
         }
         
         if (esc_state == 2) {
-            // CSI sequence: skip until we get a final byte (0x40-0x7e)
-            // Parameter bytes: 0x30-0x3f, Intermediate: 0x20-0x2f
             if (c >= 0x40 && c <= 0x7e) {
-                esc_state = 0;  // End of CSI
+                esc_state = 0;
             }
             continue;
         }
         
         if (esc_state == 3) {
-            // OSC mode - skip until BEL (0x07) or ST (ESC \)
             if (c == 0x07) {
                 esc_state = 0;
             } else if (c == 0x1b) {
-                // Possibly start of ST (ESC \)
-                esc_state = 5;  // Expect backslash next
+                esc_state = 5;
             }
             continue;
         }
         
         if (esc_state == 4) {
-            // Skip one char after ESC ( or ESC )
             esc_state = 0;
             continue;
         }
@@ -1205,14 +1401,12 @@ static void render_terminal(g15canvas *canvas) {
             if (c == '\\') {
                 esc_state = 0;
             } else {
-                // Not ST, maybe something else, reset
                 esc_state = 0;
             }
             continue;
         }
         
         if (c == 0x1b) {
-            // Start of escape sequence
             esc_state = 1;
             continue;
         }
@@ -1221,7 +1415,6 @@ static void render_terminal(g15canvas *canvas) {
             line_num++;
             col_num = 0;
             if (c == '\n') {
-                // Skip possible \r after \n
                 if (i + 1 < terminal_buf_len) {
                     char next = terminal_buffer[buf_pos];
                     if (next == '\r') {
@@ -1231,26 +1424,22 @@ static void render_terminal(g15canvas *canvas) {
                 }
             }
         } else if (c == '\t') {
-            // Tab - move to next multiple of 4
             int spaces = 4 - (col_num % 4);
             for (int s = 0; s < spaces && col_num < TERMINAL_COLS; s++) {
                 lines[line_num][col_num++] = ' ';
             }
         } else if (c >= 32 && c < 127) {
-            // Printable character
             if (col_num < TERMINAL_COLS) {
                 lines[line_num][col_num++] = c;
             }
         }
-        // Ignore other control characters for simplicity
     }
     
-    // Display the last TERMINAL_ROWS lines
     int start_line = (line_num >= TERMINAL_ROWS) ? line_num - TERMINAL_ROWS + 1 : 0;
     int display_row = 0;
     
     for (int i = start_line; i <= line_num && display_row < TERMINAL_ROWS; i++) {
-        if (lines[i][0] || display_row == 0) { // Show empty lines at start for prompt
+        if (lines[i][0] || display_row == 0) {
             g15r_renderString(canvas, (unsigned char *)lines[i], 0, TERMINAL_FONT_SIZE, 0, display_row * TERMINAL_CHAR_HEIGHT);
             display_row++;
         }
@@ -1269,7 +1458,6 @@ void terminal_send_input(const char *input, size_t len) {
 void digital_clock(lcd_t *lcd) {
     long long now = get_now_ms();
     time_t seconds = (time_t)(now / 1000);
-    // 1. CACHE THE SCRIPT PATH (Only run whoami ONCE)
     static char script_path[256] = "";
     if (script_path[0] == '\0') {
         char user[64] = {0};
@@ -1281,15 +1469,11 @@ void digital_clock(lcd_t *lcd) {
         }
         if (fp) pclose(fp);
         
-        // Fallback if whoami failed
         if (script_path[0] == '\0') strcpy(script_path, "display.txt");
     }
 
-    // 2. TRIGGER LOGIC
-    // We run if the second changed OR if a delay is set (meaning we want high FPS)
     if (now - lcd->ident >= 1000 || render_delay_ms > 0) {
         
-        // 3. USE STATIC CANVAS (No more malloc/free every frame)
         static g15canvas canvas_obj;
         g15canvas *canvas = &canvas_obj;
 
@@ -1301,7 +1485,6 @@ void digital_clock(lcd_t *lcd) {
         if (terminal_mode) {
             render_terminal(canvas);
         } else {
-            // This is now lightning fast because script_path is pre-calculated
             int rendered = render_scripted_display(canvas, script_path);
 
             if (!rendered) {
@@ -1310,24 +1493,20 @@ void digital_clock(lcd_t *lcd) {
                 memset(hour_buf, 0, 3);
                 memset(min_buf, 0, 3);
 
-                // 12 hour format
                 if (!g510s_data.clock_mode) {
                     char ampm_buf[3];
                     memset(ampm_buf, 0, 3);
                     strftime(hour_buf, 3, "%l", localtime(&seconds));
                     strftime(ampm_buf, 3, "%p", localtime(&seconds));
                     g15r_renderString(canvas, (unsigned char *)ampm_buf, 0, G15_TEXT_LARGE, 135, 26);
-                } else { // 24 hour format
+                } else {
                     strftime(hour_buf, 3, "%H", localtime(&seconds));
                 }
                 g15r_renderString(canvas, (unsigned char *)hour_buf, 0, 39, 30, 2);
-                //g15r_G15FPrint(canvas, ":", 77, -3, 39, 0, 1, 0);
 
-                // minute
                 strftime(min_buf, 3, "%M", localtime(&seconds));
                 g15r_renderString(canvas, (unsigned char *)min_buf, 0, 39, 86, 2);
 
-                // date string
                 if (g510s_data.show_date) {
                     char date_buf[40];
                     memset(date_buf, 0, 40);
@@ -1335,25 +1514,24 @@ void digital_clock(lcd_t *lcd) {
                     g15r_renderString(canvas, (unsigned char *)date_buf, 0, G15_TEXT_MED, 80 - ((strlen(date_buf) * 5) / 2), 35);
                 }
             }
+            
+            // Render notification overlay
+            render_notification(canvas);
         }
 
         apply_display_settings(canvas);
         
         // Copy to LCD buffer
         memcpy(lcd->buf, canvas->buffer, G15_BUFFER_LEN);
+        // Copy to preview buffer for GUI
+        memcpy(preview_buffer, canvas->buffer, G15_BUFFER_LEN);
 
-        // 4. THE DELAY LOGIC
         if (render_delay_ms > 0) {
             usleep(render_delay_ms * 1000);
-            // printf("Current delay: %d ms\n", render_delay_ms);
         } else {
-            // We are running FASTER than 1FPS (render_delay_ms is 0)
-            // Use a tiny 1ms sleep to prevent 100% CPU usage
             usleep(50000); 
-            // printf("Current delay: %d ms\n", render_delay_ms);
         }
 
-        // Only update ident when the actual wall-clock second changes
         lcd->ident = now;
     }
 }
